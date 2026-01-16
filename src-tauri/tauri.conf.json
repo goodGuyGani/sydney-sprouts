@@ -1,0 +1,36 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Delivery System",
+  "version": "0.1.0",
+  "identifier": "com.deliverysystem.desktop",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://127.0.0.1:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Delivery System",
+        "width": 800,
+        "height": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' tauri: asset: https://asset.localhost; img-src 'self' asset: https://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self';"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
