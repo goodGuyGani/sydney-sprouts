@@ -46,6 +46,40 @@ Currently, two official plugins are available:
 - [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
 - [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
 
+## Dataverse Type Generator
+
+Generate TypeScript types from Dataverse tables (similar to Prisma). This tool authenticates with Dataverse, fetches table definitions, and generates TypeScript interfaces.
+
+### Usage
+
+```bash
+pnpm generate:types
+```
+
+The script will:
+1. Authenticate with Dataverse using MSAL
+2. Fetch all available tables
+3. Display an interactive selection menu (use space to select, enter to confirm)
+4. Generate TypeScript types for selected tables
+5. Save types to `src/types/dataverse.ts` (or custom path)
+
+### Environment Variables
+
+Optional - the script uses defaults if not set:
+- `VITE_MSAL_CLIENT_ID` - Azure AD Client ID
+- `VITE_MSAL_AUTHORITY` - Azure AD Authority URL
+- `VITE_DATAVERSE_URL` - Dataverse environment URL
+
+### Example Output
+
+```typescript
+export interface Account {
+  accountid: string
+  name?: string | null
+  // ... other fields
+}
+```
+
 ## React Compiler
 
 The React Compiler is currently not compatible with SWC. See [this issue](https://github.com/vitejs/vite-plugin-react/issues/428) for tracking the progress.

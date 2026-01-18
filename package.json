@@ -25,9 +25,12 @@
     "cap:run:ios": "cap run ios",
     "build:cap": "pnpm build && cap sync",
     "build:cap:android": "pnpm build && cap sync android",
-    "build:cap:ios": "pnpm build && cap sync ios"
+    "build:cap:ios": "pnpm build && cap sync ios",
+    "generate:types": "node scripts/generate-types.mjs"
   },
   "dependencies": {
+    "@azure/msal-browser": "^4.28.0",
+    "@azure/msal-react": "^3.0.24",
     "@capacitor/android": "^8.0.1",
     "@capacitor/core": "^8.0.1",
     "@capacitor/ios": "^8.0.1",
@@ -81,6 +84,7 @@
     "zod": "^4.3.5"
   },
   "devDependencies": {
+    "@azure/msal-node": "^5.0.2",
     "@capacitor/cli": "^8.0.1",
     "@eslint/js": "^9.39.1",
     "@tauri-apps/cli": "2.9.6",
@@ -88,6 +92,8 @@
     "@types/react": "^19.2.5",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react-swc": "^4.2.2",
+    "dotenv": "^17.2.3",
+    "enquirer": "^2.4.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.4.24",
