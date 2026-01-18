@@ -33,7 +33,8 @@ export function DataverseTables() {
       setTestData(testQuery)
       setError(null)
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Connection test failed'))
+      const error = err instanceof Error ? err : new Error('Connection test failed')
+      setError(error)
     } finally {
       setTestingAuth(false)
     }
@@ -52,7 +53,8 @@ export function DataverseTables() {
       const tableDefinitions = await dataverseApi.getTableDefinitions(token)
       setTables(tableDefinitions)
     } catch (err) {
-      setError(err instanceof Error ? err : new Error('Failed to fetch tables'))
+      const error = err instanceof Error ? err : new Error('Failed to fetch tables')
+      setError(error)
     } finally {
       setLoading(false)
     }

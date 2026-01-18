@@ -2,6 +2,7 @@ import { useMsal, useIsAuthenticated } from '@azure/msal-react'
 import { loginRequest } from '@/lib/msalConfig'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { toast } from 'sonner'
 
 export function LoginButton() {
   const { instance } = useMsal()
@@ -12,13 +13,23 @@ export function LoginButton() {
       await instance.loginPopup(loginRequest)
     } catch (error) {
       if (error instanceof Error && error.message !== 'user_cancelled') {
-        alert('Login failed. Please try again.')
+        toast.error('Login failed', {
+          description: 'Please try again.',
+        })
       }
     }
   }
 
-  const handleLogout = () => {
-    instance.logoutPopup()
+  const handleLogout = async () => {
+    try {
+      await instance.logoutPopup()
+    } catch (error) {
+      if (error instanceof Error && error.message !== 'user_cancelled') {
+        toast.error('Logout failed', {
+          description: 'Please try again.',
+        })
+      }
+    }
   }
 
   const accounts = instance.getAllAccounts()
@@ -41,7 +52,7 @@ export function LoginButton() {
         <Avatar>
           <AvatarFallback>{initials}</AvatarFallback>
         </Avatar>
-        <Button variant="outline" onClick={handleLogout}>
+        <Button variant="outline" onClick={() => void handleLogout()}>
           Sign Out
         </Button>
       </div>
@@ -49,6 +60,6 @@ export function LoginButton() {
   }
 
   return (
-    <Button onClick={handleLogin}>Sign In with Microsoft</Button>
+    <Button onClick={() => void handleLogin()}>Sign In with Microsoft</Button>
   )
 }

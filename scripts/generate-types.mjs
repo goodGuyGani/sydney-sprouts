@@ -3,10 +3,20 @@ const { MultiSelect, Input } = Enquirer
 import { PublicClientApplication, InteractionRequiredAuthError } from '@azure/msal-node'
 import { fileURLToPath } from 'url'
 import { dirname, join } from 'path'
-import { writeFileSync, existsSync, mkdirSync } from 'fs'
+import { writeFileSync, existsSync, mkdirSync, readFileSync } from 'fs'
+import { createInterface } from 'readline'
 import dotenv from 'dotenv'
 
 dotenv.config()
+
+const parseTableNames = (input) => {
+  if (!input) return []
+  
+  return input
+    .split(/[\n,;|\s]+/)
+    .map(name => name.trim().toLowerCase())
+    .filter(name => name.length > 0)
+}
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -474,6 +484,29 @@ const generateTypesFile = (typeDefinitions, outputPath) => {
 
 const main = async () => {
   try {
+    const args = process.argv.slice(2)
+    let tableNamesInput = null
+    
+    if (args.includes('--tables') || args.includes('-t')) {
+      const index = args.includes('--tables') ? args.indexOf('--tables') : args.indexOf('-t')
+      if (args[index + 1]) {
+        tableNamesInput = args[index + 1]
+      }
+    } else if (args.includes('--from-file') || args.includes('-f')) {
+      const index = args.includes('--from-file') ? args.indexOf('--from-file') : args.indexOf('-f')
+      if (args[index + 1]) {
+        const filePath = join(projectRoot, args[index + 1])
+        if (existsSync(filePath)) {
+          tableNamesInput = readFileSync(filePath, 'utf-8')
+        } else {
+          console.error(`❌ File not found: ${filePath}`)
+          process.exit(1)
+        }
+      }
+    } else if (args.length > 0 && !args[0].startsWith('-')) {
+      tableNamesInput = args.join(' ')
+    }
+
     console.log('🔐 Authenticating with Dataverse...')
     const accessToken = await acquireToken()
     console.log('✅ Authentication successful!\n')
@@ -482,32 +515,216 @@ const main = async () => {
     const tables = await fetchTableDefinitions(accessToken)
     console.log(`✅ Found ${tables.length} tables\n`)
 
-    const tableMap = new Map()
-    const tableChoices = tables.map((table) => {
-      const displayName = getDisplayName(table.DisplayName) || table.LogicalName
-      const choiceName = `${displayName} (${table.LogicalName})`
-      tableMap.set(choiceName, table)
-      return choiceName
-    }).sort((a, b) => a.localeCompare(b))
-
-    const prompt = new MultiSelect({
-      name: 'selectedTables',
-      message: 'Select tables to generate types for (type to search, space to select, enter to confirm):',
-      choices: tableChoices,
-      limit: 15,
-      multiple: true,
-    })
-
-    const selectedNames = await prompt.run()
+    const tablesByName = new Map(tables.map(t => [t.LogicalName.toLowerCase(), t]))
     
-    if (!selectedNames || selectedNames.length === 0) {
-      console.log('❌ No tables selected. Exiting.')
-      process.exit(0)
-    }
+    let selectedTables = []
 
-    const selectedTables = selectedNames
-      .map(name => tableMap.get(name))
-      .filter(Boolean)
+    if (tableNamesInput) {
+      const requestedTableNames = parseTableNames(tableNamesInput)
+      console.log(`📋 Auto-selecting ${requestedTableNames.length} table(s) from input...\n`)
+      
+      const foundTables = []
+      const notFound = []
+      
+      requestedTableNames.forEach(name => {
+        const table = tablesByName.get(name)
+        if (table) {
+          foundTables.push(table)
+        } else {
+          notFound.push(name)
+        }
+      })
+
+      if (notFound.length > 0) {
+        console.warn(`⚠️  Warning: The following table(s) were not found:`)
+        notFound.forEach(name => console.warn(`   - ${name}`))
+        console.log('')
+      }
+
+      if (foundTables.length === 0) {
+        console.log('❌ No valid tables found. Exiting.')
+        process.exit(0)
+      }
+
+      selectedTables = foundTables
+      console.log(`✅ Found ${foundTables.length} valid table(s):`)
+      foundTables.forEach(table => {
+        const displayName = getDisplayName(table.DisplayName) || table.LogicalName
+        console.log(`   ✓ ${displayName} (${table.LogicalName})`)
+      })
+      console.log('')
+    } else {
+      console.log('💡 Tip: You can paste table names directly as arguments:')
+      console.log('   pnpm generate:types ps_deliveryroutes ps_deliveryschedule salesorder')
+      console.log('   pnpm generate:types --tables "ps_deliveryroutes\nps_deliveryschedule"')
+      console.log('   pnpm generate:types --from-file tables.txt\n')
+      
+      const inputPrompt = new Input({
+        name: 'inputMethod',
+        message: 'How would you like to select tables? (1=interactive, 2=paste names, 3=from file)',
+        initial: '1',
+      })
+      
+      const inputMethod = await inputPrompt.run()
+      
+      if (inputMethod === '2') {
+        console.log('\n💡 Paste table names (can be on multiple lines, separated by commas, spaces, or newlines):')
+        console.log('   After pasting, press Enter twice (empty line) to confirm\n')
+        
+        const rl = createInterface({
+          input: process.stdin,
+          output: process.stdout,
+        })
+        
+        let pastedNames = ''
+        let emptyLineCount = 0
+        let hasInput = false
+        
+        console.log('Paste table names and press Enter twice to finish:')
+        
+        for await (const line of rl) {
+          if (line.trim() === '') {
+            emptyLineCount++
+            if (emptyLineCount >= 2 && hasInput) {
+              break
+            }
+          } else {
+            emptyLineCount = 0
+            hasInput = true
+            pastedNames += line + '\n'
+          }
+        }
+        
+        rl.close()
+        
+        if (!pastedNames || pastedNames.trim().length === 0) {
+          console.log('❌ No table names provided. Exiting.')
+          process.exit(0)
+        }
+        
+        const requestedTableNames = parseTableNames(pastedNames)
+        
+        if (requestedTableNames.length === 0) {
+          console.log('❌ No table names provided. Exiting.')
+          process.exit(0)
+        }
+        
+        console.log(`\n📋 Auto-selecting ${requestedTableNames.length} table(s) from input...\n`)
+        
+        const foundTables = []
+        const notFound = []
+        
+        requestedTableNames.forEach(name => {
+          const table = tablesByName.get(name)
+          if (table) {
+            foundTables.push(table)
+          } else {
+            notFound.push(name)
+          }
+        })
+
+        if (notFound.length > 0) {
+          console.warn(`⚠️  Warning: The following table(s) were not found:`)
+          notFound.forEach(name => console.warn(`   - ${name}`))
+          console.log('')
+        }
+
+        if (foundTables.length === 0) {
+          console.log('❌ No valid tables found. Exiting.')
+          process.exit(0)
+        }
+
+        selectedTables = foundTables
+        console.log(`✅ Found ${foundTables.length} valid table(s):`)
+        foundTables.forEach(table => {
+          const displayName = getDisplayName(table.DisplayName) || table.LogicalName
+          console.log(`   ✓ ${displayName} (${table.LogicalName})`)
+        })
+        console.log('')
+      } else if (inputMethod === '3') {
+        const filePrompt = new Input({
+          name: 'filePath',
+          message: 'Enter file path (relative to project root):',
+          initial: 'tables.txt',
+        })
+        
+        const filePath = await filePrompt.run()
+        const fullPath = join(projectRoot, filePath)
+        
+        if (!existsSync(fullPath)) {
+          console.error(`❌ File not found: ${filePath}`)
+          process.exit(1)
+        }
+        
+        const fileContent = readFileSync(fullPath, 'utf-8')
+        const requestedTableNames = parseTableNames(fileContent)
+        
+        if (requestedTableNames.length === 0) {
+          console.log('❌ No table names found in file. Exiting.')
+          process.exit(0)
+        }
+        
+        console.log(`\n📋 Auto-selecting ${requestedTableNames.length} table(s) from file...\n`)
+        
+        const foundTables = []
+        const notFound = []
+        
+        requestedTableNames.forEach(name => {
+          const table = tablesByName.get(name)
+          if (table) {
+            foundTables.push(table)
+          } else {
+            notFound.push(name)
+          }
+        })
+
+        if (notFound.length > 0) {
+          console.warn(`⚠️  Warning: The following table(s) were not found:`)
+          notFound.forEach(name => console.warn(`   - ${name}`))
+          console.log('')
+        }
+
+        if (foundTables.length === 0) {
+          console.log('❌ No valid tables found. Exiting.')
+          process.exit(0)
+        }
+
+        selectedTables = foundTables
+        console.log(`✅ Found ${foundTables.length} valid table(s):`)
+        foundTables.forEach(table => {
+          const displayName = getDisplayName(table.DisplayName) || table.LogicalName
+          console.log(`   ✓ ${displayName} (${table.LogicalName})`)
+        })
+        console.log('')
+      } else {
+        const tableMap = new Map()
+        const tableChoices = tables.map((table) => {
+          const displayName = getDisplayName(table.DisplayName) || table.LogicalName
+          const choiceName = `${displayName} (${table.LogicalName})`
+          tableMap.set(choiceName, table)
+          return choiceName
+        }).sort((a, b) => a.localeCompare(b))
+
+        const prompt = new MultiSelect({
+          name: 'selectedTables',
+          message: 'Select tables to generate types for (type to search, space to select, enter to confirm):',
+          choices: tableChoices,
+          limit: 15,
+          multiple: true,
+        })
+
+        const selectedNames = await prompt.run()
+        
+        if (!selectedNames || selectedNames.length === 0) {
+          console.log('❌ No tables selected. Exiting.')
+          process.exit(0)
+        }
+
+        selectedTables = selectedNames
+          .map(name => tableMap.get(name))
+          .filter(Boolean)
+      }
+    }
 
     console.log(`\n📝 Generating types for ${selectedTables.length} table(s)...\n`)
 

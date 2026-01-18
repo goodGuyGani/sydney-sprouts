@@ -1,0 +1,10 @@
+ps_deliveryroutes
+ps_deliveryschedule
+ps_jobassetattachment
+salesorder
+salesorderdetail
+ps_postalareaboundary
+ps_relatedasset
+ps_setting
+ps_territorygroup
+ps_vehicledatabase

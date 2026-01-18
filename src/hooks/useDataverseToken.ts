@@ -1,5 +1,5 @@
 import { useMsal } from '@azure/msal-react'
-import { AuthenticationResult, SilentRequest, InteractionRequiredAuthError } from '@azure/msal-browser'
+import { type AuthenticationResult, type SilentRequest, InteractionRequiredAuthError } from '@azure/msal-browser'
 import { getDataverseScope } from '@/lib/msalConfig'
 import { DATAVERSE_ENVIRONMENT_URL } from '@/lib/dataverseConfig'
 import { useCallback, useState } from 'react'
@@ -11,7 +11,8 @@ export function useDataverseToken() {
 
   const getAccessToken = useCallback(async (): Promise<string | null> => {
     if (accounts.length === 0) {
-      setError(new Error('No account found. Please sign in first.'))
+      const error = new Error('No account found. Please sign in first.')
+      setError(error)
       return null
     }
 

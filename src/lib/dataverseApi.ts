@@ -61,7 +61,7 @@ class DataverseApiClient {
     }
 
     if (hasBody) {
-      headers['Content-Type'] = 'application/json'
+      (headers as Record<string, string>)['Content-Type'] = 'application/json'
     }
 
     const response = await fetch(url, {
@@ -74,7 +74,20 @@ class DataverseApiClient {
       throw new Error(`Dataverse API error: ${response.status} ${response.statusText}. ${errorText}`)
     }
 
-    return response.json()
+    const status = response.status
+    const isNoContent = status === 204 || status === 201
+    
+    if (isNoContent) {
+      return null as T
+    }
+
+    const contentType = response.headers.get('content-type')
+    if (contentType && contentType.includes('application/json')) {
+      const result = await response.json() as T
+      return result
+    }
+
+    return null as T
   }
 
   async getTableDefinitions(accessToken: string): Promise<DataverseTableDefinition[]> {
@@ -115,13 +128,13 @@ class DataverseApiClient {
     return response.value
   }
 
-  async queryTable(
+  async queryTable<T = Record<string, unknown>>(
     accessToken: string,
     entitySetName: string,
     query?: string
-  ): Promise<any[]> {
+  ): Promise<T[]> {
     const endpoint = query ? `/${entitySetName}?${query}` : `/${entitySetName}`
-    const response = await this.makeRequest<DataverseResponse<any>>(
+    const response = await this.makeRequest<DataverseResponse<T>>(
       endpoint,
       accessToken,
       {
@@ -137,6 +150,51 @@ class DataverseApiClient {
       accessToken,
       {
         method: 'GET',
+      }
+    )
+  }
+
+  async createRecord<T>(
+    accessToken: string,
+    entitySetName: string,
+    data: Partial<T>
+  ): Promise<T> {
+    return this.makeRequest<T>(
+      `/${entitySetName}`,
+      accessToken,
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }
+    )
+  }
+
+  async updateRecord<T>(
+    accessToken: string,
+    entitySetName: string,
+    recordId: string,
+    data: Partial<T>
+  ): Promise<void> {
+    await this.makeRequest<void>(
+      `/${entitySetName}(${recordId})`,
+      accessToken,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(data),
+      }
+    )
+  }
+
+  async deleteRecord(
+    accessToken: string,
+    entitySetName: string,
+    recordId: string
+  ): Promise<void> {
+    await this.makeRequest<void>(
+      `/${entitySetName}(${recordId})`,
+      accessToken,
+      {
+        method: 'DELETE',
       }
     )
   }
