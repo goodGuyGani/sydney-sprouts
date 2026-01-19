@@ -8,10 +8,12 @@ import { type PsDeliveryroutes, psdeliveryroutesEntitySet, type PsVehicledatabas
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/ui/spinner'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
 import { toast } from 'sonner'
-import { Trash2, Save, RotateCcw, Navigation, Car } from 'lucide-react'
+import { Trash2, Save, RotateCcw, Navigation, Car, Check, ChevronsUpDown } from 'lucide-react'
 import { getRouteForAllStops } from '@/lib/routeUtils'
+import { cn } from '@/lib/utils'
 import { MapTileLayer, type MapStyle, mapStyles } from '@/components/MapStyleSelector'
 import { MapStyleControl } from '@/components/MapStyleControl'
 import { MapBoundsFitter } from '@/components/MapBoundsFitter'
@@ -206,6 +208,7 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
   const [vehicles, setVehicles] = useState<PsVehicledatabase[]>([])
   const [loadingVehicles, setLoadingVehicles] = useState(false)
   const [mapStyle, setMapStyle] = useState<MapStyle>('osm')
+  const [vehiclePopoverOpen, setVehiclePopoverOpen] = useState(false)
 
   const optimizedCoordinates = useMemo(() => {
     return optimizeRouteSequence(coordinates)
@@ -366,20 +369,138 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
   }, [optimizedCoordinates])
 
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Route Map Creator</CardTitle>
-            <CardDescription>
-              Click on the map to add delivery coordinates. The system will automatically calculate the optimal route sequence.
-            </CardDescription>
+    <div className="">
+      <div className=" bg-gradient-to-b from-cyan-500/20 via-blue-500/15 to-cyan-600/20 border-r border-cyan-400/30 border-b p-4 rounded-lg">
+      <h2 className="text-2xl  text-cyan-800 font-bold">
+            Route Map Creator
+          </h2>
+          
+          <p className="text-muted-foreground font-normal mt-2">
+            Click on the map to add delivery coordinates. The system will automatically calculate the optimal route sequence.
+          </p>
+      </div>
+      <div className="space-y-6 p-6 border-2 border-cyan-400 rounded-lg my-5">
+        <div className="flex flex-col md:flex-row gap-4 items-start md:items-end">
+          <div className="flex-1 w-full">
+            <label htmlFor="vehicle-select" className="text-sm font-semibold mb-2 block text-foreground">
+              <span className="flex items-center gap-2">
+                <Car className="size-4 text-primary" />
+                Vehicle
+                <span className="text-destructive">*</span>
+              </span>
+            </label>
+            {loadingVehicles ? (
+              <div className="flex items-center gap-2 h-10 px-3 rounded-lg border bg-muted/50">
+                <Spinner className="size-4 text-primary" />
+                <span className="text-sm text-muted-foreground">Loading vehicles...</span>
+              </div>
+            ) : (
+              <Popover open={vehiclePopoverOpen} onOpenChange={setVehiclePopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    id="vehicle-select"
+                    variant="outline"
+                    role="combobox"
+                    className="w-full h-10 justify-between border-2 hover:border-primary/50 transition-colors"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Car className="size-4 text-primary" />
+                      {vehicleId
+                        ? (() => {
+                            const selectedVehicle = vehicles.find((v) => v.ps_vehicledatabaseid === vehicleId)
+                            if (!selectedVehicle) return 'Select a vehicle'
+                            const nickname = selectedVehicle.ps_nickname
+                            const makeModel = selectedVehicle.ps_make && selectedVehicle.ps_model 
+                              ? `${selectedVehicle.ps_make} ${selectedVehicle.ps_model}` 
+                              : null
+                            const plate = selectedVehicle.ps_plate
+                            const displayName = nickname || makeModel || plate || 'Unnamed Vehicle'
+                            const parts: string[] = [displayName]
+                            if (plate && plate !== displayName) {
+                              parts.push(`(${plate})`)
+                            }
+                            if (makeModel && nickname && makeModel !== nickname) {
+                              parts.push(`- ${makeModel}`)
+                            }
+                            return parts.join(' ')
+                          })()
+                        : 'Select a vehicle'}
+                    </div>
+                    <ChevronsUpDown className="ml-2 size-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-(--radix-popover-trigger-width) p-0 z-1001" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search vehicles..." className="h-9" />
+                    <CommandList>
+                      <CommandEmpty>No vehicles found.</CommandEmpty>
+                      <CommandGroup>
+                        {vehicles.length === 0 ? (
+                          <CommandItem disabled>
+                            No vehicles available
+                          </CommandItem>
+                        ) : (
+                          vehicles.map((vehicle) => {
+                            const vId = vehicle.ps_vehicledatabaseid || ''
+                            const nickname = vehicle.ps_nickname
+                            const makeModel = vehicle.ps_make && vehicle.ps_model 
+                              ? `${vehicle.ps_make} ${vehicle.ps_model}` 
+                              : null
+                            const plate = vehicle.ps_plate
+                            
+                            const displayName = nickname || makeModel || plate || 'Unnamed Vehicle'
+                            const parts: string[] = [displayName]
+                            
+                            if (plate && plate !== displayName) {
+                              parts.push(`(${plate})`)
+                            }
+                            if (makeModel && nickname && makeModel !== nickname) {
+                              parts.push(`- ${makeModel}`)
+                            }
+                            
+                            const vehicleLabel = parts.join(' ')
+                            
+                            return (
+                              <CommandItem
+                                key={vId}
+                                value={vehicleLabel}
+                                onSelect={() => {
+                                  setVehicleId(vId)
+                                  setVehiclePopoverOpen(false)
+                                }}
+                              >
+                                <Check
+                                  className={cn(
+                                    "mr-2 size-4",
+                                    vehicleId === vId ? "opacity-100" : "opacity-0"
+                                  )}
+                                />
+                                {vehicleLabel}
+                              </CommandItem>
+                            )
+                          })
+                        )}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            )}
+          </div>
+          <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 border border-primary/20">
+            <div className="flex items-center gap-2">
+              <div className="size-2 rounded-full bg-primary animate-pulse"></div>
+              <div className="text-sm font-semibold text-primary">
+                {optimizedCoordinates.length} coordinate{optimizedCoordinates.length !== 1 ? 's' : ''} added
+              </div>
+            </div>
           </div>
           <div className="flex gap-2">
             <Button
               variant="outline"
               onClick={handleClearAll}
               disabled={coordinates.length === 0 || isSaving}
+              className="border-2 hover:bg-destructive/10 hover:border-destructive/50 hover:text-destructive transition-all"
             >
               <RotateCcw className="mr-2 size-4" />
               Clear All
@@ -391,6 +512,7 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
               }}
               disabled={optimizedCoordinates.length === 0 || !vehicleId || isSaving}
               type="button"
+              className=" bg-gradient-to-b from-cyan-500 to-blue-500 hover:from-cyan-600 hover:to-blue-600 text-black shadow-md hover:shadow-lg shadow-cyan-500/30 transition-all"
             >
               {isSaving ? (
                 <>
@@ -406,70 +528,11 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
             </Button>
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="flex gap-4">
-          <div className="flex-1">
-            <label htmlFor="vehicle-select" className="text-sm font-medium mb-2 block">
-              Vehicle <span className="text-destructive">*</span>
-            </label>
-            {loadingVehicles ? (
-              <div className="flex items-center gap-2 h-9">
-                <Spinner className="size-4" />
-                <span className="text-sm text-muted-foreground">Loading vehicles...</span>
-              </div>
-            ) : (
-              <Select value={vehicleId} onValueChange={setVehicleId} required>
-                <SelectTrigger id="vehicle-select" className="w-full">
-                  <Car className="mr-2 size-4" />
-                  <SelectValue placeholder="Select a vehicle" />
-                </SelectTrigger>
-                <SelectContent className="z-1001">
-                  {vehicles.length === 0 ? (
-                    <SelectItem value="no-vehicles" disabled>
-                      No vehicles available
-                    </SelectItem>
-                  ) : (
-                    vehicles.map((vehicle) => {
-                      const vehicleId = vehicle.ps_vehicledatabaseid || ''
-                      const nickname = vehicle.ps_nickname
-                      const makeModel = vehicle.ps_make && vehicle.ps_model 
-                        ? `${vehicle.ps_make} ${vehicle.ps_model}` 
-                        : null
-                      const plate = vehicle.ps_plate
-                      
-                      const displayName = nickname || makeModel || plate || 'Unnamed Vehicle'
-                      const parts: string[] = [displayName]
-                      
-                      if (plate && plate !== displayName) {
-                        parts.push(`(${plate})`)
-                      }
-                      if (makeModel && nickname && makeModel !== nickname) {
-                        parts.push(`- ${makeModel}`)
-                      }
-                      
-                      return (
-                        <SelectItem key={vehicleId} value={vehicleId}>
-                          {parts.join(' ')}
-                        </SelectItem>
-                      )
-                    })
-                  )}
-                </SelectContent>
-              </Select>
-            )}
-          </div>
-          <div className="flex items-end">
-            <div className="text-sm text-muted-foreground">
-              {optimizedCoordinates.length} coordinate{optimizedCoordinates.length !== 1 ? 's' : ''} added
-            </div>
-          </div>
-        </div>
 
-        <div className="rounded-lg border overflow-hidden relative" style={{ height: '600px' }}>
+        <div className="rounded-xl border-2 border-primary/20 overflow-hidden relative shadow-lg  from-muted/30 to-background" style={{ height: '600px' }}>
           {loadingRoute && optimizedCoordinates.length > 1 && (
-            <div className="absolute top-4 left-4 z-1000 bg-background/90 backdrop-blur p-2 rounded-md border shadow-md">
-              <div className="flex items-center gap-2 text-sm">
+            <div className="absolute top-4 left-4 z-1000  from-primary/95 to-primary/90 backdrop-blur-md p-3 rounded-lg border border-primary/30 shadow-xl">
+              <div className="flex items-center gap-2 text-sm text-primary-foreground font-medium">
                 <Spinner className="size-4" />
                 <span>Calculating road route...</span>
               </div>
@@ -505,7 +568,12 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
             {roadRoutePositions.length > 1 && (
               <Polyline
                 positions={roadRoutePositions}
-                pathOptions={{ color: '#ef4444', weight: 4 }}
+                pathOptions={{ 
+                  color: '#3b82f6', 
+                  weight: 5,
+                  opacity: 0.8,
+                  dashArray: '10, 5'
+                }}
               />
             )}
 
@@ -516,13 +584,22 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
                 icon={defaultIcon}
               >
                 <Popup>
-                  <div className="space-y-2">
-                    <div className="font-semibold">
-                      Stop #{coord.sequence}
+                  <div className="space-y-3 p-1">
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-center w-6 h-6 rounded-full  from-primary to-primary/70 text-primary-foreground font-bold text-xs">
+                        {coord.sequence}
+                      </div>
+                      <div className="font-semibold text-base">
+                        Stop #{coord.sequence}
+                      </div>
                     </div>
-                    <div className="text-sm">
-                      <div>Lat: {coord.lat.toFixed(6)}</div>
-                      <div>Lng: {coord.lng.toFixed(6)}</div>
+                    <div className="text-sm space-y-1 bg-muted/50 p-2 rounded-md">
+                      <div className="font-mono text-xs">
+                        <span className="text-muted-foreground">Lat:</span> {coord.lat.toFixed(6)}
+                      </div>
+                      <div className="font-mono text-xs">
+                        <span className="text-muted-foreground">Lng:</span> {coord.lng.toFixed(6)}
+                      </div>
                     </div>
                     <Button
                       variant="destructive"
@@ -532,7 +609,7 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
                         e.preventDefault()
                         handleRemoveCoordinate(coord.id)
                       }}
-                      className="w-full mt-2"
+                      className="w-full mt-2 hover:bg-destructive/90 transition-all"
                     >
                       <Trash2 className="mr-2 size-3" />
                       Remove
@@ -545,51 +622,65 @@ export function RouteMapCreator({ onSaveSuccess }: RouteMapCreatorProps) {
         </div>
 
         {optimizedCoordinates.length > 0 && (
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base flex items-center gap-2">
-                <Navigation className="size-4" />
+          <Card className="border-2 border-primary/20  from-primary/5 via-background to-primary/5 shadow-md">
+            <CardHeader className=" from-primary/10 to-transparent border-b border-primary/20">
+              <CardTitle className="text-lg flex items-center gap-2 text-primary">
+                <div className="flex items-center justify-center w-8 h-8 rounded-lg from-primary to-primary/70 text-primary-foreground">
+                  <Navigation className="size-4" />
+                </div>
                 Optimized Route Sequence
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-sm mt-1">
                 The route has been optimized for the fastest path. Coordinates are shown in delivery order.
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                {optimizedCoordinates.map((coord, index) => (
-                  <div
-                    key={coord.id}
-                    className="flex items-center justify-between p-3 rounded-lg border bg-muted/50"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground font-semibold text-sm">
-                        {coord.sequence}
-                      </div>
-                      <div>
-                        <div className="font-medium">Stop {coord.sequence}</div>
-                        <div className="text-sm text-muted-foreground font-mono">
-                          {coord.lat.toFixed(6)}, {coord.lng.toFixed(6)}
+            <CardContent className="p-6">
+              <div className="space-y-3">
+                {optimizedCoordinates.map((coord, index) => {
+                  const distance = index < optimizedCoordinates.length - 1
+                    ? calculateDistance(
+                        coord.lat,
+                        coord.lng,
+                        optimizedCoordinates[index + 1].lat,
+                        optimizedCoordinates[index + 1].lng
+                      )
+                    : null
+                  
+                  return (
+                    <div key={coord.id}>
+                      <div className="flex items-center justify-between p-4 rounded-lg border-2 border-primary/10  from-background to-primary/5 hover:border-primary/30 hover:shadow-md transition-all">
+                        <div className="flex items-center gap-4">
+                          <div className="flex items-center justify-center w-10 h-10 rounded-full  from-primary via-primary/90 to-primary/70 text-primary-foreground font-bold text-base shadow-md">
+                            {coord.sequence}
+                          </div>
+                          <div>
+                            <div className="font-semibold text-base">Stop {coord.sequence}</div>
+                            <div className="text-xs text-muted-foreground font-mono mt-0.5">
+                              {coord.lat.toFixed(6)}, {coord.lng.toFixed(6)}
+                            </div>
+                          </div>
                         </div>
+                        {distance !== null && (
+                          <div className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-primary/10 border border-primary/20">
+                            <div className="text-primary font-semibold text-sm">
+                              ↓ {distance.toFixed(2)} km
+                            </div>
+                          </div>
+                        )}
                       </div>
+                      {index < optimizedCoordinates.length - 1 && (
+                        <div className="flex justify-center py-1">
+                          <div className="w-0.5 h-4  from-primary/50 to-primary/30"></div>
+                        </div>
+                      )}
                     </div>
-                    {index < optimizedCoordinates.length - 1 && (
-                      <div className="text-muted-foreground">
-                        ↓ {calculateDistance(
-                          coord.lat,
-                          coord.lng,
-                          optimizedCoordinates[index + 1].lat,
-                          optimizedCoordinates[index + 1].lng
-                        ).toFixed(2)} km
-                      </div>
-                    )}
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </CardContent>
           </Card>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   )
 }

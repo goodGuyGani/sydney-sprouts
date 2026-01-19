@@ -44,6 +44,7 @@ import {
 } from 'lucide-react'
 import { useIsMobile } from '@/hooks/use-mobile'
 import { toast } from 'sonner'
+import { cn } from '@/lib/utils'
 
 export interface NavItem {
   title: string
@@ -171,26 +172,31 @@ export function AdminSidebar({ activeTab, onNavClick }: AdminSidebarProps) {
     .slice(0, 2) || 'U'
 
   return (
-    <Sidebar collapsible="icon">
-      <SidebarHeader>
+    <Sidebar 
+      collapsible="icon"
+      className="bg-gradient-to-b from-cyan-500/20 via-blue-500/15 to-cyan-600/20 border-r border-cyan-400/30"
+    >
+      <SidebarHeader className="bg-gradient-to-r from-cyan-500/30 via-blue-500/20 to-transparent border-b border-cyan-400/20">
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg">
-              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+            <SidebarMenuButton size="lg" className="hover:bg-cyan-500/20 transition-all">
+              <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-blue-500 text-white shadow-lg shadow-cyan-500/50">
                 <Truck className="size-4" />
               </div>
               <div className="grid flex-1 text-left text-sm leading-tight">
-                <span className="truncate font-semibold">Delivery System</span>
-                <span className="truncate text-xs">Operations Console</span>
+                <span className="truncate font-bold text-black">Delivery System</span>
+                <span className="truncate text-xs text-black/70">Operations Console</span>
               </div>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="bg-gradient-to-b from-transparent via-cyan-500/5 to-transparent">
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel className="text-black/80 font-semibold text-xs uppercase tracking-wider px-3 py-2">
+            Navigation
+          </SidebarGroupLabel>
           <SidebarMenu>
             {navMain.map((item) => (
               <Collapsible
@@ -201,20 +207,30 @@ export function AdminSidebar({ activeTab, onNavClick }: AdminSidebarProps) {
               >
                 <SidebarMenuItem>
                   <CollapsibleTrigger asChild>
-                    <SidebarMenuButton tooltip={item.title} className="transition-all duration-200 hover:bg-sidebar-accent/50">
-                      {item.icon && <item.icon className="transition-colors duration-200" />}
-                      <span>{item.title}</span>
-                      <ChevronRight className="ml-auto size-4 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90" />
+                    <SidebarMenuButton 
+                      tooltip={item.title} 
+                      className="transition-all duration-300 hover:bg-gradient-to-r hover:from-cyan-500/30 hover:to-blue-500/20 hover:text-black hover:shadow-md hover:shadow-cyan-500/20 rounded-lg mx-2 my-1 group-hover/item:translate-x-1"
+                    >
+                      {item.icon && (
+                        <item.icon className="transition-all duration-300 text-cyan-600 group-hover/item:text-cyan-500 group-hover/item:scale-110" />
+                      )}
+                      <span className="font-medium text-black">{item.title}</span>
+                      <ChevronRight className="ml-auto size-4 transition-transform duration-300 ease-in-out group-data-[state=open]/collapsible:rotate-90 text-cyan-600/70" />
                     </SidebarMenuButton>
                   </CollapsibleTrigger>
                   <CollapsibleContent>
-                    <SidebarMenuSub>
+                    <SidebarMenuSub className="ml-2 border-l-2 border-cyan-400/30 pl-2">
                       {item.items?.map((subItem) => (
                         <SidebarMenuSubItem key={subItem.title}>
                           <SidebarMenuSubButton
                             asChild
                             isActive={subItem.value === activeTab}
-                            className="transition-all duration-200"
+                            className={cn(
+                              "transition-all duration-300 rounded-md mx-1 my-0.5",
+                              subItem.value === activeTab
+                                ? "bg-gradient-to-r from-cyan-500/40 to-blue-500/30 text-black shadow-md shadow-cyan-500/30 border border-cyan-400/50 font-semibold"
+                                : "hover:bg-cyan-500/20 hover:text-black hover:translate-x-1 text-black/80"
+                            )}
                           >
                             <a
                               href={subItem.url}
@@ -224,8 +240,14 @@ export function AdminSidebar({ activeTab, onNavClick }: AdminSidebarProps) {
                                   onNavClick(subItem.value)
                                 }
                               }}
-                              className="transition-colors duration-200"
+                              className="transition-colors duration-200 flex items-center gap-2"
                             >
+                              <div className={cn(
+                                "size-1.5 rounded-full transition-all",
+                                subItem.value === activeTab 
+                                  ? "bg-cyan-300 shadow-sm shadow-cyan-300" 
+                                  : "bg-cyan-500/50"
+                              )} />
                               <span>{subItem.title}</span>
                             </a>
                           </SidebarMenuSubButton>
@@ -240,33 +262,33 @@ export function AdminSidebar({ activeTab, onNavClick }: AdminSidebarProps) {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter>
+      <SidebarFooter className="bg-gradient-to-t from-cyan-500/20 via-blue-500/10 to-transparent border-t border-cyan-400/20">
         <SidebarMenu>
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <SidebarMenuButton
                   size="lg"
-                  className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+                  className="data-[state=open]:bg-gradient-to-r data-[state=open]:from-cyan-500/30 data-[state=open]:to-blue-500/20 data-[state=open]:text-cyan-50 hover:bg-gradient-to-r hover:from-cyan-500/20 hover:to-blue-500/10 transition-all rounded-lg mx-2"
                 >
-                  <Avatar className="h-8 w-8 rounded-lg">
-                    <AvatarFallback className="rounded-lg">
+                  <Avatar className="h-8 w-8 rounded-lg ring-2 ring-cyan-400/50 shadow-lg shadow-cyan-500/30">
+                    <AvatarFallback className="rounded-lg bg-gradient-to-br from-cyan-400 to-blue-500 text-white font-bold">
                       {userInitials}
                     </AvatarFallback>
                   </Avatar>
                   <div className="grid flex-1 text-left text-sm leading-tight">
-                    <span className="truncate font-semibold">
+                    <span className="truncate font-semibold text-black">
                       {activeAccount?.name || 'User'}
                     </span>
-                    <span className="truncate text-xs">
+                    <span className="truncate text-xs text-black/70">
                       {activeAccount?.username || 'Not signed in'}
                     </span>
                   </div>
-                  <ChevronsUpDown className="ml-auto size-4" />
+                  <ChevronsUpDown className="ml-auto size-4 text-cyan-400/70" />
                 </SidebarMenuButton>
               </DropdownMenuTrigger>
               <DropdownMenuContent
-                className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg z-[1001]"
+                className="w-[--radix-dropdown-menu-trigger-width] min-w-56 rounded-lg z-1001"
                 side={isMobile ? 'bottom' : 'right'}
                 align="end"
                 sideOffset={4}
