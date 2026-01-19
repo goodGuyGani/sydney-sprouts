@@ -1,6 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { LoginPage } from '@/components/LoginPage'
-import { AdminPage } from '@/components/AdminPage'
+import { AdminPage } from '@/admin-dashboard/AdminPage'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { Toaster } from '@/components/ui/sonner'
 
