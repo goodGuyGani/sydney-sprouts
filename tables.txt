@@ -8,3 +8,6 @@ ps_relatedasset
 ps_setting
 ps_territorygroup
 ps_vehicledatabase
+ps_staff
+product
+account
