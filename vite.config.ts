@@ -17,13 +17,13 @@ export default defineConfig({
     },
   },
   server: {
-    host: 'localhost',
-    port: 5173,
+    host: '::',
+    port: 3000,
     strictPort: true,
     hmr: {
       protocol: 'ws',
       host: 'localhost',
-      port: 5174,
+      port: 3000,
     },
     watch: {
       ignored: ['**/src-tauri/**'],
