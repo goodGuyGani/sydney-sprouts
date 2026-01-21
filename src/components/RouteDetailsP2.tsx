@@ -5,32 +5,24 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { type PsDeliveryroutes, type Salesorder, type Salesorderdetail, type PsStaff, type PsVehicledatabase, psdeliveryroutesEntitySet, salesorderEntitySet, salesorderdetailEntitySet, psstaffEntitySet, psvehicledatabaseEntitySet } from '@/types/dataverse'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Spinner } from '@/components/ui/spinner'
 import { 
   ArrowLeft, 
   Truck,
-  Car, 
   User, 
   Navigation, 
-  Package, 
   Clock, 
   Route,
-  Edit,
-  Printer,
   GripVertical,
-  CheckCircle2,
-  Camera,
-  FileText,
   Phone,
   MapPin
 } from 'lucide-react'
 import { getRouteForAllStops } from '@/lib/routeUtils'
 import { reverseGeocode } from '@/lib/geocoding'
 import { MapTileLayer, type MapStyle } from '@/components/MapStyleSelector'
-import { MapStyleControl } from '@/components/MapStyleControl'
 import { MapBoundsFitter } from '@/components/MapBoundsFitter'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { toast } from 'sonner'
@@ -152,31 +144,18 @@ function formatTime(dateString: string | null | undefined): string {
   }
 }
 
-function getStatusBadge(status: RouteMetadata['status']) {
-  const variants = {
-    'Planned': 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400',
-    'In Progress': 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-400',
-    'Completed': 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400',
-  }
-  return variants[status]
-}
-
 function SortableStopItem({ 
   stop, 
   index, 
   isSelected, 
   onSelect,
   isEditable,
-  isCompleted,
-  isCurrent
 }: { 
   stop: StopWithOrders
   index: number
   isSelected: boolean
   onSelect: () => void
   isEditable: boolean
-  isCompleted: boolean
-  isCurrent: boolean
 }) {
   const {
     attributes,
@@ -200,14 +179,6 @@ function SortableStopItem({
   const contactPhone = stop.ps_contactphone || '-'
   const orderCount = stop.orderCount || 0
   const productLineCount = stop.productLineCount || 0
-  const priority = stop.ps_orderpriority
-  const actualDeliveryTime = stop.ps_actualdeliverytime
-  const deliveredBy = stop.ps_deliveredby ? 'Driver' : '-'
-  const confirmationStatus = stop.ps_deliveryconfirmationstatus
-  const driverNotes = stop.ps_drivernotes
-  const hasPhoto = stop.ps_hasphoto
-
-  const isPriority = priority && priority >= 3
 
   return (
     <div ref={setNodeRef} style={style} className="relative">
@@ -313,7 +284,7 @@ function MapCenterer({ center }: { center: [number, number] }) {
 
 export function RouteDetailsP2({ routeGroupId: _routeGroupId, routes, onBack, onNavigateToOrder }: RouteDetailsP2Props) {
   const { getAccessToken } = useDataverseToken()
-  const [mapStyle, setMapStyle] = useState<MapStyle>('osm')
+  const [mapStyle] = useState<MapStyle>('osm')
   const [stops, setStops] = useState<StopWithOrders[]>([])
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null)
   const [loadingAddresses, setLoadingAddresses] = useState(false)
@@ -692,29 +663,6 @@ export function RouteDetailsP2({ routeGroupId: _routeGroupId, routes, onBack, on
     }
   }
 
-  const handleOptimizeRoute = async () => {
-    if (!routeMetadata?.isEditable) {
-      toast.error('Cannot optimize route', {
-        description: 'This route is read-only',
-      })
-      return
-    }
-
-    toast.info('Route optimization', {
-      description: 'This feature will be implemented soon',
-    })
-  }
-
-  const handleEditRoute = () => {
-    toast.info('Edit route', {
-      description: 'Route editing dialog will be implemented soon',
-    })
-  }
-
-  const handlePrint = () => {
-    window.print()
-  }
-
   if (loadingMetadata || routes.length === 0) {
     return (
       <div className="flex items-center justify-center min-h-[400px]">
@@ -739,8 +687,6 @@ export function RouteDetailsP2({ routeGroupId: _routeGroupId, routes, onBack, on
   const routeIdFormatted = routeMetadata.routeId.startsWith('RT-') 
     ? routeMetadata.routeId 
     : `RT-${routeMetadata.routeId.slice(-8).toUpperCase().replace(/-/g, '')}`
-
-  const showConditionalNotice = routeMetadata.routeDate && isToday(routeMetadata.routeDate) && !routes[0]?.ps_actualstarttime
 
   return (
     <div className="min-h-screen bg-slate-50 p-6 space-y-6">
@@ -1038,8 +984,6 @@ export function RouteDetailsP2({ routeGroupId: _routeGroupId, routes, onBack, on
                       strategy={verticalListSortingStrategy}
                     >
                       {sortedStops.map((stop, index) => {
-                        const isCompleted = stop.ps_deliveryconfirmationstatus === 2
-                        const isCurrent = index === 0 && isInProgress
                         const isSelected = stop.ps_deliveryroutesid === selectedStopId
 
                         return (
@@ -1050,8 +994,6 @@ export function RouteDetailsP2({ routeGroupId: _routeGroupId, routes, onBack, on
                             isSelected={isSelected}
                             onSelect={() => handleStopClick(stop)}
                             isEditable={routeMetadata.isEditable}
-                            isCompleted={isCompleted}
-                            isCurrent={isCurrent}
                           />
                         )
                       })}

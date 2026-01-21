@@ -2,7 +2,7 @@
   "appId": "",
   "appDisplayName": "Delivery Management App React",
   "description": null,
-  "environmentId": "Default-e571e05f-df5a-4cac-af8b-272965d6a1cc",
+  "environmentId": "5fd9ad3c-7dee-ec77-af82-97072c435ec1",
   "buildPath": "./dist",
   "buildEntryPoint": "index.html",
   "logoPath": "Default",

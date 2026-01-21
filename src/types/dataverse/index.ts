@@ -186,26 +186,27 @@ export const EntitySets = {
 } as const
 
 
-export type DataverseEntity = PsDeliveryroutes |
-  PsDeliveryschedule |
-  PsJobassetattachment |
-  Salesorder |
-  Salesorderdetail |
-  PsPostalareaboundary |
-  PsRelatedasset |
-  PsSetting |
-  PsTerritorygroup |
-  PsVehicledatabase |
-  Product |
-  Account |
-  PsStaff |
-  PsAppfeature |
-  PsJoblist |
-  Aaduser |
-  PsPoreportgenerationrequest |
-  PsProductsuppliermapping |
-  PsPurchaseorder |
-  PsPurchaseorderline |
-  PsPurchaseorderreceipt |
-  PsPurchaseorderreceiptline |
-  PsPurchaseorderreportgenerationrequest
+export type DataverseEntity =
+  | import('./PsDeliveryroutes.js').PsDeliveryroutes
+  | import('./PsDeliveryschedule.js').PsDeliveryschedule
+  | import('./PsJobassetattachment.js').PsJobassetattachment
+  | import('./Salesorder.js').Salesorder
+  | import('./Salesorderdetail.js').Salesorderdetail
+  | import('./PsPostalareaboundary.js').PsPostalareaboundary
+  | import('./PsRelatedasset.js').PsRelatedasset
+  | import('./PsSetting.js').PsSetting
+  | import('./PsTerritorygroup.js').PsTerritorygroup
+  | import('./PsVehicledatabase.js').PsVehicledatabase
+  | import('./Product.js').Product
+  | import('./Account.js').Account
+  | import('./PsStaff.js').PsStaff
+  | import('./PsAppfeature.js').PsAppfeature
+  | import('./PsJoblist.js').PsJoblist
+  | import('./Aaduser.js').Aaduser
+  | import('./PsPoreportgenerationrequest.js').PsPoreportgenerationrequest
+  | import('./PsProductsuppliermapping.js').PsProductsuppliermapping
+  | import('./PsPurchaseorder.js').PsPurchaseorder
+  | import('./PsPurchaseorderline.js').PsPurchaseorderline
+  | import('./PsPurchaseorderreceipt.js').PsPurchaseorderreceipt
+  | import('./PsPurchaseorderreceiptline.js').PsPurchaseorderreceiptline
+  | import('./PsPurchaseorderreportgenerationrequest.js').PsPurchaseorderreportgenerationrequest
