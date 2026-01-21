@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import { MapContainer, Marker, Popup, Polyline, useMap } from 'react-leaflet'
+import { MapContainer, Marker, Popup, Polyline, useMap, CircleMarker } from 'react-leaflet'
 import { Icon } from 'leaflet'
 import { type PsDeliveryroutes } from '@/types/dataverse'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -78,11 +78,24 @@ function MapMarkerHighlighter({ position }: { position: [number, number] | null 
   return null
 }
 
+function MapCenterer({ center }: { center: [number, number] }) {
+  const map = useMap()
+
+  useEffect(() => {
+    map.setView(center, map.getZoom())
+  }, [center, map])
+
+  return null
+}
+
 export function RouteDetailView({ routes, onBack }: RouteDetailViewProps) {
   const [mapStyle, setMapStyle] = useState<MapStyle>('osm')
   const [routesWithAddresses, setRoutesWithAddresses] = useState<RouteWithAddress[]>([])
   const [selectedRouteId, setSelectedRouteId] = useState<string | null>(null)
   const [loadingAddresses, setLoadingAddresses] = useState(false)
+  const [mapCenter, setMapCenter] = useState<[number, number] | null>(null)
+  const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
+  const [isLocating, setIsLocating] = useState(false)
   
   const sortedRoutes = useMemo(() => {
     return [...routes].sort((a, b) => {
@@ -150,6 +163,12 @@ export function RouteDetailView({ routes, onBack }: RouteDetailViewProps) {
     ? routePositions[0]
     : [14.5995, 120.9842]
 
+  useEffect(() => {
+    if (!mapCenter) {
+      setMapCenter(center)
+    }
+  }, [center, mapCenter])
+
   const totalDistance = useMemo(() => {
     if (roadRoutePositions.length < 2) return calculateTotalDistance(routePositions)
     return calculateTotalDistance(roadRoutePositions)
@@ -176,6 +195,43 @@ export function RouteDetailView({ routes, onBack }: RouteDetailViewProps) {
 
   const handleRouteCardClick = useCallback((route: RouteWithAddress) => {
     setSelectedRouteId(route.ps_deliveryroutesid || null)
+  }, [])
+
+  const requestUserLocation = useCallback(() => {
+    if (typeof window === 'undefined' || typeof navigator === 'undefined' || !navigator.geolocation) {
+      toast.error('Location not supported', {
+        description: 'Your device or browser blocked GPS access.',
+      })
+      return
+    }
+
+    setIsLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const coords: [number, number] = [position.coords.latitude, position.coords.longitude]
+        setUserLocation(coords)
+        setMapCenter(coords)
+        toast.success('Location detected', {
+          description: 'Centered on your current position.',
+        })
+        setIsLocating(false)
+      },
+      (error) => {
+        const errorMessage =
+          error.code === error.PERMISSION_DENIED
+            ? 'Permission denied. Please allow location access.'
+            : 'Unable to get your location. Try again.'
+        toast.error('Location unavailable', {
+          description: errorMessage,
+        })
+        setIsLocating(false)
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    )
   }, [])
 
   return (
@@ -239,14 +295,35 @@ export function RouteDetailView({ routes, onBack }: RouteDetailViewProps) {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
             <div className="lg:col-span-2 rounded-lg border overflow-hidden relative" style={{ height: '600px' }}>
-              {loadingRoute && routePositions.length > 1 && (
-                <div className="absolute top-4 left-4 z-1000 bg-background/90 backdrop-blur p-2 rounded-md border shadow-md">
-                  <div className="flex items-center gap-2 text-sm">
-                    <Spinner className="size-4" />
-                    <span>Calculating road route...</span>
+              <div className="absolute top-4 left-4 z-1000 flex flex-col gap-2">
+                {loadingRoute && routePositions.length > 1 && (
+                  <div className="bg-background/90 backdrop-blur p-2 rounded-md border shadow-md">
+                    <div className="flex items-center gap-2 text-sm">
+                      <Spinner className="size-4" />
+                      <span>Calculating road route...</span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  className="shadow-md bg-background/80 backdrop-blur border"
+                  disabled={isLocating}
+                  onClick={requestUserLocation}
+                >
+                  {isLocating ? (
+                    <>
+                      <Spinner className="size-4 mr-2" />
+                      Locating...
+                    </>
+                  ) : (
+                    <>
+                      <Navigation className="size-4 mr-2" />
+                      Use my location
+                    </>
+                  )}
+                </Button>
+              </div>
               <div className="absolute top-4 right-4 z-1000">
                 <MapStyleControl
                   value={mapStyle}
@@ -259,14 +336,15 @@ export function RouteDetailView({ routes, onBack }: RouteDetailViewProps) {
                 />
               </div>
               <MapContainer
-                center={center}
-                zoom={13}
+                center={mapCenter || center}
+                zoom={mapCenter ? 15 : 13}
                 style={{ height: '100%', width: '100%' }}
               >
                 <MapTileLayer style={mapStyle} />
+                {mapCenter && <MapCenterer center={mapCenter} />}
                 {routePositions.length > 0 && (
                   <MapBoundsFitter
-                    positions={routePositions}
+                    positions={[...routePositions, ...(userLocation ? [userLocation] : [])]}
                     padding={[50, 50]}
                   />
                 )}
@@ -301,6 +379,22 @@ export function RouteDetailView({ routes, onBack }: RouteDetailViewProps) {
                     </Marker>
                   )
                 })}
+                {userLocation && (
+                  <CircleMarker
+                    center={userLocation}
+                    radius={10}
+                    pathOptions={{ color: '#0ea5e9', fillColor: '#0ea5e9', fillOpacity: 0.4, weight: 2 }}
+                  >
+                    <Popup>
+                      <div className="space-y-1">
+                        <div className="font-semibold">Your location</div>
+                        <div className="text-xs font-mono text-muted-foreground">
+                          {userLocation[0].toFixed(6)}, {userLocation[1].toFixed(6)}
+                        </div>
+                      </div>
+                    </Popup>
+                  </CircleMarker>
+                )}
               </MapContainer>
             </div>
 

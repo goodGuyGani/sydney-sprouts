@@ -114,6 +114,76 @@ const fetchTableDefinitions = async (accessToken) => {
   return data.value || []
 }
 
+const fetchOptionSetChoices = async (accessToken, logicalName, attributeLogicalName) => {
+  try {
+    const response = await fetch(
+      `${apiUrl}/EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${attributeLogicalName}')/Microsoft.Dynamics.CRM.PicklistAttributeMetadata/OptionSet`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          'Prefer': 'odata.include-annotations="*"',
+        },
+      }
+    )
+
+    if (!response.ok) {
+      return null
+    }
+
+    const optionSet = await response.json()
+    const options = optionSet.Options || []
+    
+    return options.map(opt => ({
+      value: opt.Value,
+      label: opt.Label?.UserLocalizedLabel?.Label || opt.Label?.LocalizedLabels?.[0]?.Label || `Option ${opt.Value}`,
+    }))
+  } catch {
+    return null
+  }
+}
+
+const fetchTwoOptionsMetadata = async (accessToken, logicalName, attributeLogicalName) => {
+  try {
+    const response = await fetch(
+      `${apiUrl}/EntityDefinitions(LogicalName='${logicalName}')/Attributes(LogicalName='${attributeLogicalName}')/Microsoft.Dynamics.CRM.BooleanAttributeMetadata`,
+      {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Accept': 'application/json',
+          'OData-MaxVersion': '4.0',
+          'OData-Version': '4.0',
+          'Prefer': 'odata.include-annotations="*"',
+        },
+      }
+    )
+
+    if (!response.ok) {
+      return null
+    }
+
+    const metadata = await response.json()
+    return {
+      trueOption: {
+        value: metadata.OptionSet?.TrueOption?.Value ?? 1,
+        label: metadata.OptionSet?.TrueOption?.Label?.UserLocalizedLabel?.Label || 
+               metadata.OptionSet?.TrueOption?.Label?.LocalizedLabels?.[0]?.Label || 
+               'Yes',
+      },
+      falseOption: {
+        value: metadata.OptionSet?.FalseOption?.Value ?? 0,
+        label: metadata.OptionSet?.FalseOption?.Label?.UserLocalizedLabel?.Label || 
+               metadata.OptionSet?.FalseOption?.Label?.LocalizedLabels?.[0]?.Label || 
+               'No',
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
 const fetchTableAttributes = async (accessToken, logicalName) => {
   const response = await fetch(
     `${apiUrl}/EntityDefinitions(LogicalName='${logicalName}')/Attributes`,
@@ -188,10 +258,11 @@ const fetchTableRelationships = async (accessToken, logicalName) => {
   }
 }
 
-const mapAttributeTypeToTypeScript = (attribute) => {
+const mapAttributeTypeToTypeScript = (attribute, fieldName) => {
   const type = attribute.AttributeType || ''
   const isRequired = attribute.RequiredLevel === 'SystemRequired' || attribute.RequiredLevel === 'ApplicationRequired'
   const nullable = isRequired ? '' : ' | null'
+  const lower = (fieldName || '').toLowerCase()
 
   switch (type) {
     case 'String':
@@ -220,8 +291,16 @@ const mapAttributeTypeToTypeScript = (attribute) => {
     case 'EntityName':
       return `string${nullable}`
     case 'Virtual':
+      // Virtual fields that are lookup display fields should be string | null, not unknown
+      if (lower.includes('name') || lower.includes('yominame')) {
+        return `string | null`
+      }
       return 'unknown'
     default:
+      // For unknown types, check if it's a display name field
+      if (lower.includes('name') || lower.includes('yominame')) {
+        return `string | null`
+      }
       return 'unknown'
   }
 }
@@ -274,6 +353,113 @@ const getDescription = (description) => {
   return null
 }
 
+const categorizeField = (fieldName, attribute) => {
+  const lower = fieldName.toLowerCase()
+  const attrType = attribute.AttributeType || ''
+  
+  // Yes/No fields (Boolean)
+  if (attrType === 'Boolean') {
+    return 'yesno'
+  }
+  
+  // Choice fields (Option Sets)
+  if (attrType === 'Picklist' || attrType === 'State' || attrType === 'Status') {
+    return 'choice'
+  }
+  
+  // Audit fields - check first before other checks
+  if (lower.includes('createdby') || lower.includes('createdon') || lower.includes('modifiedby') || lower.includes('modifiedon') || lower.includes('createdonbehalfby') || lower.includes('modifiedonbehalfby') || lower.includes('overriddencreatedon') || lower.includes('importsequencenumber')) {
+    return 'audit'
+  }
+  
+  // Ownership fields
+  if (lower.includes('ownerid') || lower.includes('owningbusinessunit') || lower.includes('owningteam') || lower.includes('owninguser')) {
+    return 'ownership'
+  }
+  
+  // System fields (but not if they're choice fields - handled above)
+  if ((lower === 'statecode' || lower === 'statuscode' || lower === 'versionnumber' || lower.includes('timezoneruleversionnumber') || lower.includes('utcconversiontimezonecode')) && attrType !== 'State' && attrType !== 'Status') {
+    return 'system'
+  }
+  
+  // Reference fields (Lookups) - check AttributeType first, then field name pattern
+  if (attrType === 'Lookup' || attrType === 'Customer' || attrType === 'Owner' || attrType === 'Uniqueidentifier') {
+    // Lookup fields that end with 'id' and are not display names
+    if (lower.endsWith('id') && !lower.includes('name')) {
+      return 'reference'
+    }
+    // Some lookup fields might not end with 'id', check if it's a reference type
+    if (lower.includes('_id') || (!lower.includes('name') && !lower.includes('yominame'))) {
+      return 'reference'
+    }
+  }
+  
+  // Reference fields check - must happen before business fields check
+  // Some ps_ prefixed fields might actually be lookups (like ps_account, ps_driver)
+  if (lower.startsWith('ps_')) {
+    if (attrType === 'Lookup' || attrType === 'Customer' || attrType === 'Owner' || attrType === 'Uniqueidentifier') {
+      // If it ends with 'id' or contains '_id', it's a reference field
+      if (lower.endsWith('id') || lower.includes('_id')) {
+        return 'reference'
+      }
+      // If it doesn't have 'name' in it, it might be a reference field
+      if (!lower.includes('name')) {
+        return 'reference'
+      }
+    }
+  }
+  
+  // Lookup display fields - fields that contain 'name' or 'yominame' and are not ps_ prefixed
+  // But exclude if it's a business field (ps_ prefixed name fields)
+  if ((lower.includes('name') || lower.includes('yominame')) && !lower.startsWith('ps_')) {
+    // Double check - if it's a lookup display field, it shouldn't be a Lookup type
+    if (attrType !== 'Lookup' && attrType !== 'Customer' && attrType !== 'Owner') {
+      return 'lookup'
+    }
+  }
+  
+  // Business fields - ps_ prefixed fields that are not already categorized as something else
+  if (lower.startsWith('ps_')) {
+    return 'business'
+  }
+  
+  // Other fields that end with 'id' but aren't lookups
+  if (lower.endsWith('id') && !lower.includes('name') && attrType !== 'Lookup' && attrType !== 'Customer' && attrType !== 'Owner') {
+    return 'other'
+  }
+  
+  return 'other'
+}
+
+const getBusinessContext = (logicalName) => {
+  const contextMap = {
+    'ps_deliveryroutes': 'Delivery Route - Represents a scheduled delivery stop/route in the delivery system. Links customer accounts (Account), drivers (PsStaff), vehicles (PsVehicledatabase), and sales orders (Salesorder) for route optimization and tracking. Each route has planned/actual times, sequence, location coordinates, and capacity usage.',
+    'ps_deliveryschedule': 'Delivery Schedule - Defines delivery schedules and territories for managing recurring delivery routes and route assignments.',
+    'ps_jobassetattachment': 'Job Asset Attachment - Attachments and assets related to delivery jobs and schedules.',
+    'salesorder': 'Sales Order - Customer orders that trigger delivery requirements. The sales order is the source document for creating delivery routes. When a customer places an order, it creates a sales order which then generates delivery route requirements.',
+    'salesorderdetail': 'Sales Order Detail - Line items within a sales order, specifying products (Product) and quantities to be delivered. Each detail line links to a product and quantity.',
+    'ps_postalareaboundary': 'Postal Area Boundary - Geographic boundaries for postal/territory management in routing and territory assignment.',
+    'ps_relatedasset': 'Related Asset - Assets and equipment related to deliveries (e.g., vehicles, tools, equipment).',
+    'ps_setting': 'Application Settings - Configuration settings for the delivery and purchase order system.',
+    'ps_territorygroup': 'Territory Group - Groups territories for organizing delivery routes by geographic regions.',
+    'ps_vehicledatabase': 'Vehicle Database - Fleet management system tracking vehicles assigned to routes. Includes vehicle assignments to drivers (PsStaff) and capacity information for route planning.',
+    'product': 'Product - Catalog of products available for purchase and delivery. Includes inventory levels, supplier mappings (PsProductsuppliermapping), product specifications, and pricing. Products are ordered through purchase orders (PsPurchaseorder) and delivered via sales orders (Salesorder).',
+    'account': 'Account - Customers/clients who receive deliveries, and supplier accounts for purchase orders. Central entity linking purchases (PsPurchaseorder), deliveries (PsDeliveryroutes), and sales (Salesorder). Each account can have multiple delivery routes and sales orders.',
+    'ps_staff': 'Staff - Employees including drivers, managers, and operations staff. Used to assign drivers (ps_driver) to delivery routes (PsDeliveryroutes) and managers to territories. Links to Azure AD users (Aaduser) for authentication.',
+    'ps_appfeature': 'Application Feature - Feature flags and application configuration.',
+    'ps_joblist': 'Job List - List of delivery jobs/work orders that need to be scheduled and routed. Jobs are assigned to delivery routes.',
+    'aaduser': 'Azure AD User - Microsoft Entra ID user accounts linked to staff members (PsStaff) for authentication and authorization.',
+    'ps_poreportgenerationrequest': 'PO Report Generation Request - Request to generate purchase order reports.',
+    'ps_productsuppliermapping': 'Product Supplier Mapping - Maps products (Product) to suppliers (Account) for automated purchase order creation. When inventory is low, the system can automatically create purchase orders to the mapped supplier.',
+    'ps_purchaseorder': 'Purchase Order - Orders from suppliers to restock inventory. Links to suppliers (Account via ps_supplier), products (via PsPurchaseorderline), jobs (ps_job), and approvers (PsStaff). Tracks total amounts, approval status, and receipt status.',
+    'ps_purchaseorderline': 'Purchase Order Line - Line items in a purchase order (PsPurchaseorder), specifying products (Product) and quantities to purchase. Each line links to a product and includes quantity and pricing information.',
+    'ps_purchaseorderreceipt': 'Purchase Order Receipt - Receipt records for received purchase orders, tracking what was actually received vs what was ordered. Links to the original purchase order (PsPurchaseorder).',
+    'ps_purchaseorderreceiptline': 'Purchase Order Receipt Line - Line items in a purchase order receipt (PsPurchaseorderreceipt), detailing what quantities were actually received for each product.',
+    'ps_purchaseorderreportgenerationrequest': 'PO Report Generation Request - Request to generate purchase order reports.',
+  }
+  return contextMap[logicalName.toLowerCase()] || ''
+}
+
 const generateType = async (accessToken, table, selectedTablesMap) => {
   const [attributes, relationships] = await Promise.all([
     fetchTableAttributes(accessToken, table.LogicalName),
@@ -281,43 +467,109 @@ const generateType = async (accessToken, table, selectedTablesMap) => {
   ])
   
   const displayName = getDisplayName(table.DisplayName) || table.LogicalName
-  const description = getDescription(table.Description) || `Table: ${table.LogicalName}`
+  let description = getDescription(table.Description) || ''
+  const businessContext = getBusinessContext(table.LogicalName)
+  
+  if (businessContext) {
+    if (description && description.trim() !== '') {
+      description = `${description}\n * \n * ${businessContext}`
+    } else {
+      description = businessContext
+    }
+  } else if (!description || description.trim() === '') {
+    description = `Table: ${table.LogicalName}`
+  }
 
   const typeName = toPascalCase(table.LogicalName)
   const entitySetName = table.EntitySetName || `${table.LogicalName}Set`
 
-  let typeDefinition = `/**
- * ${displayName}
- * ${description}
- */
-export interface ${typeName} {
-  ${table.PrimaryIdAttribute}${table.PrimaryIdAttribute === 'id' ? '' : '?'}: string`
-
-  if (attributes.length > 0) {
-    typeDefinition += '\n'
-    
-    attributes.forEach((attr) => {
-      if (attr.LogicalName === table.PrimaryIdAttribute) {
-        return
-      }
-
-      const isRequired = attr.RequiredLevel === 'SystemRequired' || attr.RequiredLevel === 'ApplicationRequired'
-      const isVirtual = attr.AttributeType === 'Virtual'
-      const optional = isRequired ? '' : '?'
-      let tsType = mapAttributeTypeToTypeScript(attr)
-      
-      if (isVirtual && tsType.includes(' | null')) {
-        tsType = tsType.replace(' | null', '')
-      }
-
-      typeDefinition += `  ${attr.LogicalName}${optional}: ${tsType}\n`
-    })
+  const primaryIdField = `${table.PrimaryIdAttribute}${table.PrimaryIdAttribute === 'id' ? '' : '?'}: string`
+  
+  const categorizedFields = {
+    primary: [],
+    business: [],
+    choice: [],
+    yesno: [],
+    reference: [],
+    lookup: [],
+    audit: [],
+    ownership: [],
+    system: [],
+    other: [],
   }
+
+  const choiceFields = []
+  const yesNoFields = []
+
+  for (const attr of attributes) {
+    if (attr.LogicalName === table.PrimaryIdAttribute) {
+      continue
+    }
+
+    const isRequired = attr.RequiredLevel === 'SystemRequired' || attr.RequiredLevel === 'ApplicationRequired'
+    const isVirtual = attr.AttributeType === 'Virtual'
+    const optional = isRequired ? '' : '?'
+    let tsType = mapAttributeTypeToTypeScript(attr, attr.LogicalName)
+    
+    // For virtual lookup display fields, keep null but make it optional
+    const isLookupDisplay = (attr.LogicalName.toLowerCase().includes('name') || attr.LogicalName.toLowerCase().includes('yominame')) && !attr.LogicalName.toLowerCase().startsWith('ps_')
+    if (isVirtual && !isLookupDisplay && tsType.includes(' | null')) {
+      tsType = tsType.replace(' | null', '')
+    }
+
+    const category = categorizeField(attr.LogicalName, attr)
+    
+    if (category === 'choice' && (attr.AttributeType === 'Picklist' || attr.AttributeType === 'State' || attr.AttributeType === 'Status')) {
+      choiceFields.push({ attr, category })
+    } else if (category === 'yesno' && attr.AttributeType === 'Boolean') {
+      yesNoFields.push({ attr, category })
+    } else {
+      const fieldLine = `  ${attr.LogicalName}${optional}: ${tsType}`
+      categorizedFields[category].push(fieldLine)
+    }
+  }
+
+  for (const { attr } of choiceFields) {
+    const choices = await fetchOptionSetChoices(accessToken, table.LogicalName, attr.LogicalName)
+    const isRequired = attr.RequiredLevel === 'SystemRequired' || attr.RequiredLevel === 'ApplicationRequired'
+    const optional = isRequired ? '' : '?'
+    
+    let fieldLine = `  ${attr.LogicalName}${optional}: number | null`
+    
+    if (choices && choices.length > 0) {
+      const choicesComment = choices.map(c => `   * ${c.value}: ${c.label}`).join('\n')
+      fieldLine = `  /**\n   * Choice Field (Option Set)\n   * Options:\n${choicesComment}\n   */\n  ${fieldLine}`
+    } else {
+      fieldLine = `  /**\n   * Choice Field (Option Set)\n   */\n  ${fieldLine}`
+    }
+    
+    categorizedFields.choice.push(fieldLine)
+  }
+
+  for (const { attr } of yesNoFields) {
+    const metadata = await fetchTwoOptionsMetadata(accessToken, table.LogicalName, attr.LogicalName)
+    const isRequired = attr.RequiredLevel === 'SystemRequired' || attr.RequiredLevel === 'ApplicationRequired'
+    const optional = isRequired ? '' : '?'
+    
+    let fieldLine = `  ${attr.LogicalName}${optional}: boolean | null`
+    
+    if (metadata) {
+      fieldLine = `  /**\n   * Yes/No Field (Two Options)\n   * ${metadata.trueOption.value} = ${metadata.trueOption.label}\n   * ${metadata.falseOption.value} = ${metadata.falseOption.label}\n   */\n  ${fieldLine}`
+    } else {
+      fieldLine = `  /**\n   * Yes/No Field (Two Options)\n   * 1 = Yes\n   * 0 = No\n   */\n  ${fieldLine}`
+    }
+    
+    categorizedFields.yesno.push(fieldLine)
+  }
+
+  const navigationProperties = new Map()
+
+  // Build relationship descriptions
+  const relationshipDescriptions = []
+  // (Descriptions are populated after navigationProperties is filled below)
 
   const existingFieldNames = new Set(attributes.map(attr => attr.LogicalName))
   existingFieldNames.add(table.PrimaryIdAttribute)
-  
-  const navigationProperties = new Map()
 
   relationships.manyToOne.forEach((rel) => {
     const referencedEntity = rel.ReferencedEntity || rel['ReferencedEntity@Microsoft.Dynamics.CRM.associatednavigationproperty']
@@ -416,6 +668,79 @@ export interface ${typeName} {
     }
   })
 
+  // Build relationship descriptions now that navigationProperties is populated
+  if (navigationProperties.size > 0) {
+    relationshipDescriptions.push('\n * \n * RELATIONSHIPS:')
+    navigationProperties.forEach((navProp, navPropName) => {
+      const relatedEntity = navProp.relatedEntity
+      if (relatedEntity && selectedTablesMap?.has(relatedEntity)) {
+        const relatedTypeName = toPascalCase(relatedEntity)
+        const isArray = navProp.isArray ? '[]' : ''
+        const desc = navPropName.includes('deliveryroute') ? 'Sales orders linked to this delivery route' :
+                     navPropName.includes('PurchaseOrder') ? 'Purchase order line items' :
+                     navPropName.includes('account') ? 'Related accounts' :
+                     navPropName.includes('Product') ? 'Related products' :
+                     navPropName.includes('Staff') || navPropName.includes('driver') ? 'Staff/driver assignments' :
+                     navPropName.includes('Vehicle') ? 'Vehicle assignments' :
+                     `Related ${relatedTypeName} records`
+        relationshipDescriptions.push(` *   - ${navPropName}${isArray}: ${desc}`)
+      }
+    })
+  }
+
+  let typeDefinition = `/**
+ * ${displayName}
+ * ${description}${relationshipDescriptions.join('\n')}
+ */
+export interface ${typeName} {
+  // Primary Key
+  ${primaryIdField}`
+
+  if (categorizedFields.business.length > 0) {
+    typeDefinition += '\n\n  // Business Fields'
+    typeDefinition += '\n' + categorizedFields.business.join('\n')
+  }
+
+  if (categorizedFields.choice.length > 0) {
+    typeDefinition += '\n\n  // Choice Fields (Option Sets)'
+    typeDefinition += '\n' + categorizedFields.choice.join('\n')
+  }
+
+  if (categorizedFields.yesno.length > 0) {
+    typeDefinition += '\n\n  // Yes/No Fields (Two Options)'
+    typeDefinition += '\n' + categorizedFields.yesno.join('\n')
+  }
+
+  if (categorizedFields.reference.length > 0) {
+    typeDefinition += '\n\n  // Reference Fields (Lookups)'
+    typeDefinition += '\n' + categorizedFields.reference.join('\n')
+  }
+
+  if (categorizedFields.lookup.length > 0) {
+    typeDefinition += '\n\n  // Lookup Display Fields'
+    typeDefinition += '\n' + categorizedFields.lookup.join('\n')
+  }
+
+  if (categorizedFields.audit.length > 0) {
+    typeDefinition += '\n\n  // Audit Fields'
+    typeDefinition += '\n' + categorizedFields.audit.join('\n')
+  }
+
+  if (categorizedFields.ownership.length > 0) {
+    typeDefinition += '\n\n  // Ownership Fields'
+    typeDefinition += '\n' + categorizedFields.ownership.join('\n')
+  }
+
+  if (categorizedFields.system.length > 0) {
+    typeDefinition += '\n\n  // System Fields'
+    typeDefinition += '\n' + categorizedFields.system.join('\n')
+  }
+
+  if (categorizedFields.other.length > 0) {
+    typeDefinition += '\n\n  // Other Fields'
+    typeDefinition += '\n' + categorizedFields.other.join('\n')
+  }
+
   if (navigationProperties.size > 0) {
     if (attributes.length > 0) {
       typeDefinition += '\n'
@@ -455,15 +780,313 @@ export interface ${typeName} {
   return { typeName, typeDefinition, table }
 }
 
-const generateTypesFile = (typeDefinitions, outputPath) => {
-  const imports = `/**
- * Auto-generated Dataverse Types
+const generateIndividualTypeFile = (typeDef, outputDir, allTypeNames) => {
+  const { typeName, typeDefinition, table } = typeDef
+  const entitySetName = table.EntitySetName || `${table.LogicalName}Set`
+  
+  const relatedTypes = new Set()
+  const relatedSelectTypes = new Set()
+  const relatedExpandTypes = new Set()
+  
+  const typeDefLines = typeDefinition.split('\n')
+  typeDefLines.forEach(line => {
+    const entityMatch = line.match(/:\s*(\w+)(\[\])?(\s*\|\s*null)?/)
+    if (entityMatch && allTypeNames.includes(entityMatch[1])) {
+      relatedTypes.add(entityMatch[1])
+    }
+    
+    const selectMatch = line.match(/(\w+)Select(\[\])?/)
+    if (selectMatch && allTypeNames.includes(selectMatch[1])) {
+      relatedSelectTypes.add(selectMatch[1])
+    }
+    
+    const expandMatch = line.match(/(\w+)Expand(\s*\?)?/)
+    if (expandMatch && allTypeNames.includes(expandMatch[1])) {
+      relatedExpandTypes.add(expandMatch[1])
+    }
+  })
+  
+  const uniqueRelatedTypes = [...new Set([...relatedTypes, ...relatedSelectTypes, ...relatedExpandTypes])].filter(t => t !== typeName)
+  
+  let imports = ''
+  if (uniqueRelatedTypes.length > 0) {
+    const importTypes = uniqueRelatedTypes.map(relatedType => {
+      const typesToImport = [relatedType]
+      if (relatedSelectTypes.has(relatedType)) {
+        typesToImport.push(`${relatedType}Select`)
+      }
+      if (relatedExpandTypes.has(relatedType)) {
+        typesToImport.push(`${relatedType}Expand`)
+      }
+      return `import type { ${typesToImport.join(', ')} } from './${relatedType}.js'`
+    }).join('\n')
+    imports = importTypes + '\n\n'
+  }
+  
+  const fileContent = `/**
+ * Auto-generated Dataverse Type
  * Generated on: ${new Date().toISOString()}
+ * Table: ${table.LogicalName}
  * 
  * This file is automatically generated. Do not edit manually.
- */\n\n`
+ */
 
-  const types = typeDefinitions.map(({ typeDefinition }) => typeDefinition).join('\n')
+${imports}${typeDefinition}
+
+export const ${toCamelCase(typeName)}EntitySet: ${typeName}EntitySet = '${entitySetName}'
+`
+
+  const fileName = `${typeName}.ts`
+  const filePath = join(outputDir, fileName)
+  writeFileSync(filePath, fileContent, 'utf-8')
+  
+  return { typeName, fileName, relatedTypes: uniqueRelatedTypes }
+}
+
+const generateIndexFile = (typeDefinitions, outputDir) => {
+  const typeNames = typeDefinitions.map(({ typeName }) => typeName)
+  
+  // Business domain mapping for entity descriptions
+  const entityBusinessContext = {
+    'PsDeliveryroutes': 'Delivery Route - Represents a scheduled delivery stop/route linking customers, drivers, vehicles, and sales orders',
+    'PsDeliveryschedule': 'Delivery Schedule - Defines delivery schedules and territories for managing recurring routes',
+    'PsJobassetattachment': 'Job Asset Attachment - Attachments and assets related to delivery jobs',
+    'Salesorder': 'Sales Order - Customer orders that trigger delivery requirements',
+    'Salesorderdetail': 'Sales Order Detail - Line items within sales orders specifying products and quantities',
+    'PsPostalareaboundary': 'Postal Area Boundary - Geographic boundaries for territory management',
+    'PsRelatedasset': 'Related Asset - Assets and equipment related to deliveries',
+    'PsSetting': 'Application Settings - Configuration settings for the system',
+    'PsTerritorygroup': 'Territory Group - Groups territories for organizing routes by regions',
+    'PsVehicledatabase': 'Vehicle Database - Fleet management tracking vehicles assigned to routes',
+    'Product': 'Product - Catalog of products with inventory, suppliers, and specifications',
+    'Account': 'Account - Customers who receive deliveries and supplier accounts for purchase orders',
+    'PsStaff': 'Staff - Employees including drivers and managers assigned to routes',
+    'PsAppfeature': 'Application Feature - Feature flags and configuration',
+    'PsJoblist': 'Job List - Delivery jobs that need to be scheduled and routed',
+    'Aaduser': 'Azure AD User - Microsoft Entra ID accounts linked to staff',
+    'PsPoreportgenerationrequest': 'PO Report Request - Request to generate purchase order reports',
+    'PsProductsuppliermapping': 'Product Supplier Mapping - Maps products to suppliers for ordering',
+    'PsPurchaseorder': 'Purchase Order - Orders from suppliers to restock inventory',
+    'PsPurchaseorderline': 'Purchase Order Line - Line items in purchase orders',
+    'PsPurchaseorderreceipt': 'Purchase Order Receipt - Receipt records for received orders',
+    'PsPurchaseorderreceiptline': 'PO Receipt Line - Line items in purchase order receipts',
+    'PsPurchaseorderreportgenerationrequest': 'PO Report Request - Request to generate reports',
+  }
+
+  const header = `/**
+ * DATAVERSE TYPES INDEX - OPTIMIZED FOR AI AGENT CONTEXT
+ * 
+ * APPLICATION DOMAIN: Purchase, Delivery, Product, and Routing Management System
+ * 
+ * This is a comprehensive delivery and logistics management system with the following core capabilities:
+ * 
+ * 🚚 DELIVERY & ROUTING:
+ *   - Route Planning: Create optimized delivery routes (PsDeliveryroutes) linking customers, drivers, and vehicles
+ *   - Schedule Management: Manage delivery schedules and territories (PsDeliveryschedule, PsTerritorygroup)
+ *   - Route Tracking: Track actual vs planned delivery times, distances, and driver performance
+ *   - Job Management: Schedule and assign delivery jobs (PsJoblist) to routes and drivers
+ * 
+ * 📦 PURCHASE ORDER MANAGEMENT:
+ *   - Purchase Orders: Create and manage supplier purchase orders (PsPurchaseorder, PsPurchaseorderline)
+ *   - Product-Supplier Mapping: Link products to suppliers (PsProductsuppliermapping) for automated ordering
+ *   - Receipt Management: Track received goods (PsPurchaseorderreceipt, PsPurchaseorderreceiptline)
+ *   - Approval Workflow: Manage purchase order approvals and workflow
+ * 
+ * 🛒 PRODUCT & INVENTORY:
+ *   - Product Catalog: Manage product inventory, specifications, and suppliers (Product)
+ *   - Inventory Tracking: Track product availability and minimum quantities
+ *   - Supplier Relationships: Link products to suppliers for procurement
+ * 
+ * 👥 CUSTOMER & STAFF MANAGEMENT:
+ *   - Customer Accounts: Manage customer accounts (Account) who receive deliveries
+ *   - Staff Management: Manage drivers and operations staff (PsStaff) assigned to routes
+ *   - Vehicle Fleet: Manage delivery vehicles (PsVehicledatabase) and their assignments
+ * 
+ * 📋 SALES ORDER INTEGRATION:
+ *   - Sales Orders: Customer orders (Salesorder) trigger delivery requirements
+ *   - Order Fulfillment: Delivery routes are created from sales orders
+ *   - Line Item Tracking: Track specific products ordered (Salesorderdetail)
+ * 
+ * KEY ENTITY RELATIONSHIPS:
+ *   - Account (Customer) → Salesorder → PsDeliveryroutes (delivery routes for customer orders)
+ *   - PsDeliveryroutes → PsStaff (driver), PsVehicledatabase (vehicle), Salesorder (source order)
+ *   - Product → PsProductsuppliermapping → PsPurchaseorder (products ordered from suppliers)
+ *   - PsPurchaseorder → PsPurchaseorderline (items in purchase order)
+ *   - PsJoblist → PsDeliveryroutes (jobs scheduled on routes)
+ * 
+ * FIELD CATEGORIES (in each entity file):
+ * - Primary Key: Unique identifier for the entity
+ * - Business Fields: Core business data (prefixed with ps_)
+ * - Choice Fields (Option Sets): Fields with predefined choices (documented with option values)
+ * - Yes/No Fields (Two Options): Boolean fields with Yes/No labels (documented with true/false values)
+ * - Reference Fields (Lookups): Lookup relationships to other entities (GUIDs)
+ * - Lookup Display Fields: Display names for lookup fields (auto-generated)
+ * - Audit Fields: Created/modified tracking (createdby, modifiedon, etc.)
+ * - Ownership Fields: Owner and business unit assignments
+ * - System Fields: State, status, and version tracking
+ * - Relationships: Navigation properties to related entities
+ * 
+ * AVAILABLE ENTITIES (${typeNames.length} total):
+ * 
+ * DELIVERY & ROUTING:
+${typeNames.filter(n => n.includes('Delivery') || n.includes('Route') || n.includes('Territory') || n.includes('Job') || n.includes('Postal') || n === 'PsRelatedasset').map((name, i) => {
+    const context = entityBusinessContext[name] || ''
+    return ` *   ${i + 1}. ${name}${context ? ` - ${context}` : ''}`
+  }).join('\n')}
+ * 
+ * PURCHASE ORDER MANAGEMENT:
+${typeNames.filter(n => n.includes('Purchase') || n === 'PsProductsuppliermapping').map((name, i) => {
+    const context = entityBusinessContext[name] || ''
+    return ` *   ${i + 1}. ${name}${context ? ` - ${context}` : ''}`
+  }).join('\n')}
+ * 
+ * PRODUCT & SALES:
+${typeNames.filter(n => n === 'Product' || n.includes('Sales') || n.includes('order')).map((name, i) => {
+    const context = entityBusinessContext[name] || ''
+    return ` *   ${i + 1}. ${name}${context ? ` - ${context}` : ''}`
+  }).join('\n')}
+ * 
+ * CUSTOMER & STAFF MANAGEMENT:
+${typeNames.filter(n => n === 'Account' || n === 'PsStaff' || n === 'Aaduser' || n === 'PsVehicledatabase').map((name, i) => {
+    const context = entityBusinessContext[name] || ''
+    return ` *   ${i + 1}. ${name}${context ? ` - ${context}` : ''}`
+  }).join('\n')}
+ * 
+ * SYSTEM:
+${typeNames.filter(n => !n.includes('Delivery') && !n.includes('Route') && !n.includes('Territory') && !n.includes('Job') && !n.includes('Postal') && !n.includes('Purchase') && n !== 'PsProductsuppliermapping' && n !== 'Product' && !n.includes('Sales') && !n.includes('order') && n !== 'Account' && n !== 'PsStaff' && n !== 'Aaduser' && n !== 'PsVehicledatabase' && n !== 'PsRelatedasset').map((name, i) => {
+    const context = entityBusinessContext[name] || ''
+    return ` *   ${i + 1}. ${name}${context ? ` - ${context}` : ''}`
+  }).join('\n')}
+ * 
+ * USAGE EXAMPLES:
+ * 
+ * // Import from index (recommended for multiple types)
+ * import type { PsDeliveryroutes, PsDeliveryroutesCreate } from '@/types/dataverse'
+ * import { psdeliveryroutesEntitySet, EntitySets } from '@/types/dataverse'
+ * 
+ * // Import from individual file (better for tree-shaking)
+ * import type { PsDeliveryroutes } from '@/types/dataverse/PsDeliveryroutes'
+ * 
+ * // Create a new record
+ * const newRoute: PsDeliveryroutesCreate = {
+ *   ps_routename: 'Morning Route',
+ *   ps_route_date: '2026-01-20',
+ *   ps_driver: 'staff-guid-here',
+ * }
+ * 
+ * GENERATED ON: ${new Date().toISOString()}
+ * This file is automatically generated. Do not edit manually.
+ */
+
+`
+
+  const typeExports = typeDefinitions.map(({ typeName }) => {
+    return `export type { ${typeName}, ${typeName}Create, ${typeName}Update, ${typeName}Select, ${typeName}Expand, ${typeName}EntitySet } from './${typeName}.js'`
+  }).join('\n')
+
+  const entitySetExports = typeDefinitions.map(({ typeName }) => {
+    return `export { ${toCamelCase(typeName)}EntitySet } from './${typeName}.js'`
+  }).join('\n')
+
+  const entitySetsObject = `export const EntitySets = {\n${typeDefinitions.map(({ typeName, table }) => {
+    const entitySetName = table.EntitySetName || `${table.LogicalName}Set`
+    return `  ${toCamelCase(typeName)}: '${entitySetName}' as const,`
+  }).join('\n')}\n} as const\n`
+
+  const unionType = `export type DataverseEntity = ${typeNames.join(' |\n  ')}\n`
+
+  const indexContent = header + 
+    typeExports + '\n\n' + 
+    entitySetExports + '\n\n' + 
+    entitySetsObject + '\n\n' + 
+    unionType
+
+  writeFileSync(join(outputDir, 'index.ts'), indexContent, 'utf-8')
+}
+
+const generateTypesFile = (typeDefinitions, outputPath, splitFiles = false) => {
+  const typeNames = typeDefinitions.map(({ typeName }) => typeName)
+  
+  if (splitFiles) {
+    const outputDir = dirname(outputPath)
+    if (!existsSync(outputDir)) {
+      mkdirSync(outputDir, { recursive: true })
+    }
+    
+    typeDefinitions.forEach(typeDef => {
+      generateIndividualTypeFile(typeDef, outputDir, typeNames)
+    })
+    
+    generateIndexFile(typeDefinitions, outputDir)
+    
+    console.log(`✅ Generated ${typeDefinitions.length} individual type files in ${outputDir}`)
+    console.log(`✅ Generated index.ts for convenient imports`)
+    return
+  }
+  
+  const imports = `/**
+ * DATAVERSE TYPES - OPTIMIZED FOR AI AGENT CONTEXT
+ * 
+ * This file contains TypeScript type definitions for all Dataverse entities.
+ * Fields are organized by category for better readability and AI agent context understanding.
+ * 
+ * FIELD CATEGORIES:
+ * - Primary Key: Unique identifier for the entity
+ * - Business Fields: Core business data (prefixed with ps_)
+ * - Reference Fields: Lookup relationships to other entities (GUIDs)
+ * - Lookup Display Fields: Display names for lookup fields (auto-generated)
+ * - Audit Fields: Created/modified tracking (createdby, modifiedon, etc.)
+ * - Ownership Fields: Owner and business unit assignments
+ * - System Fields: State, status, and version tracking
+ * - Relationships: Navigation properties to related entities
+ * 
+ * AVAILABLE ENTITIES (${typeNames.length} total):
+${typeNames.map((name, i) => ` * ${String(i + 1).padStart(2, ' ')}. ${name}`).join('\n')}
+ * 
+ * USAGE EXAMPLES:
+ * 
+ * // Import types
+ * import type { PsDeliveryroutes, PsDeliveryroutesCreate, PsDeliveryroutesUpdate } from '@/types/dataverse'
+ * import { psdeliveryroutesEntitySet } from '@/types/dataverse'
+ * 
+ * // Create a new record
+ * const newRoute: PsDeliveryroutesCreate = {
+ *   ps_routename: 'Morning Route',
+ *   ps_route_date: '2026-01-20',
+ *   ps_driver: 'staff-guid-here',
+ *   ps_vehicle_route: 'vehicle-guid-here',
+ * }
+ * 
+ * // Query with select and expand
+ * const routeWithOrder = await dataverseApi.get<PsDeliveryroutes>(
+ *   psdeliveryroutesEntitySet,
+ *   { 
+ *     select: ['ps_routename', 'ps_route_date', 'ps_driver'],
+ *     expand: { 
+ *       ps_deliveryroute: { 
+ *         select: ['salesorderid', 'name', 'totalamount'] 
+ *       } 
+ *     } 
+ *   }
+ * )
+ * 
+ * // Update a record
+ * const update: PsDeliveryroutesUpdate = {
+ *   ps_routename: 'Updated Route Name',
+ *   ps_sequence: 1,
+ * }
+ * 
+ * // Use EntitySets constant
+ * import { EntitySets } from '@/types/dataverse'
+ * const entitySet = EntitySets.psdeliveryroutes
+ * 
+ * GENERATED ON: ${new Date().toISOString()}
+ * This file is automatically generated. Do not edit manually.
+ */
+
+`
+
+  const types = typeDefinitions.map(({ typeDefinition }) => typeDefinition).join('\n\n')
 
   const entitySets = typeDefinitions.map(({ typeName, table }) => {
     const entitySetName = table.EntitySetName || `${table.LogicalName}Set`
@@ -485,6 +1108,7 @@ const generateTypesFile = (typeDefinitions, outputPath) => {
 const main = async () => {
   try {
     const args = process.argv.slice(2)
+    const splitFiles = args.includes('--split') || args.includes('-s')
     let tableNamesInput = null
     
     if (args.includes('--tables') || args.includes('-t')) {
@@ -747,13 +1371,28 @@ const main = async () => {
       }
     }
 
-    const outputPrompt = new Input({
-      name: 'outputPath',
-      message: 'Output file path (relative to project root):',
-      initial: 'src/types/dataverse.ts',
-    })
+    let shouldSplitFiles = splitFiles
+    if (!splitFiles) {
+      const splitPrompt = new Input({
+        name: 'splitFiles',
+        message: 'Split into separate files? (y/n)',
+        initial: 'y',
+      })
+      shouldSplitFiles = (await splitPrompt.run()).toLowerCase() === 'y'
+    }
     
-    const outputPath = await outputPrompt.run()
+    let outputPath
+    if (splitFiles) {
+      outputPath = 'src/types/dataverse/index.ts'
+      console.log(`\n📁 Will generate separate files in src/types/dataverse/`)
+    } else {
+      const outputPrompt = new Input({
+        name: 'outputPath',
+        message: 'Output file path (relative to project root):',
+        initial: 'src/types/dataverse.ts',
+      })
+      outputPath = await outputPrompt.run()
+    }
 
     const fullOutputPath = join(projectRoot, outputPath)
     const outputDir = dirname(fullOutputPath)
@@ -762,11 +1401,20 @@ const main = async () => {
       mkdirSync(outputDir, { recursive: true })
     }
 
-    generateTypesFile(typeDefinitions, fullOutputPath)
+    generateTypesFile(typeDefinitions, fullOutputPath, shouldSplitFiles)
     
-    console.log(`\n✅ Successfully generated ${typeDefinitions.length} type(s) to ${outputPath}`)
-    console.log(`\n📦 You can now import types like:`)
-    console.log(`   import type { ${typeDefinitions[0]?.typeName || 'YourType'} } from '@/types/dataverse'`)
+    if (shouldSplitFiles) {
+      console.log(`\n✅ Successfully generated ${typeDefinitions.length} type file(s) in src/types/dataverse/`)
+      console.log(`\n📦 You can now import types like:`)
+      console.log(`   // From index (recommended)`)
+      console.log(`   import type { ${typeDefinitions[0]?.typeName || 'YourType'} } from '@/types/dataverse'`)
+      console.log(`   // Or from individual file (better tree-shaking)`)
+      console.log(`   import type { ${typeDefinitions[0]?.typeName || 'YourType'} } from '@/types/dataverse/${typeDefinitions[0]?.typeName || 'YourType'}.js'`)
+    } else {
+      console.log(`\n✅ Successfully generated ${typeDefinitions.length} type(s) to ${outputPath}`)
+      console.log(`\n📦 You can now import types like:`)
+      console.log(`   import type { ${typeDefinitions[0]?.typeName || 'YourType'} } from '@/types/dataverse'`)
+    }
     
   } catch (error) {
     console.error('\n❌ Error:', error.message)

@@ -8,6 +8,7 @@
 
 # Dependencies
 node_modules
+.cursor
 .pnp
 .pnp.js
 .yarn/cache

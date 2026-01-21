@@ -8,3 +8,16 @@ ps_relatedasset
 ps_setting
 ps_territorygroup
 ps_vehicledatabase
+product
+account
+ps_staff
+ps_appfeature
+ps_joblist
+aaduser
+ps_poreportgenerationrequest
+ps_productsuppliermapping
+ps_purchaseorder
+ps_purchaseorderline
+ps_purchaseorderreceipt
+ps_purchaseorderreceiptline
+ps_purchaseorderreportgenerationrequest

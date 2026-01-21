@@ -1,78 +1,63 @@
-import { useState } from 'react'
-import { RouteMapCreator } from '@/components/RouteMapCreator'
+import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { Truck } from 'lucide-react'
+import { OperationsDashboard } from '@/components/OperationsDashboard'
+import { RouteCreationPage } from '@/components/RouteCreationPage'
 import { DeliveryRoutesTable } from '@/components/DeliveryRoutesTable'
-import { AdminSidebar } from '@/components/AdminSidebar'
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import {
-  Breadcrumb,
-  BreadcrumbItem,
-  BreadcrumbLink,
-  BreadcrumbList,
-  BreadcrumbPage,
-  BreadcrumbSeparator,
-} from '@/components/ui/breadcrumb'
-import { Separator } from '@/components/ui/separator'
-import {
-  SidebarProvider,
-  SidebarInset,
-  SidebarTrigger,
-} from '@/components/ui/sidebar'
-import { MapPin, List } from 'lucide-react'
+import { NavigationDock } from '@/components/NavigationDock'
+import { cn } from '@/lib/utils'
 
 export function AdminPage() {
-  const [activeTab, setActiveTab] = useState('create')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabParam = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState(tabParam || 'analytics-dashboard')
 
-  const handleNavClick = (value?: string) => {
-    if (value) {
-      setActiveTab(value)
+  useEffect(() => {
+    if (tabParam) {
+      setActiveTab(tabParam)
     }
+  }, [tabParam])
+
+  const handleNavClick = (value: string) => {
+    setActiveTab(value)
+    setSearchParams({ tab: value })
+  }
+
+  const getPageTitle = () => {
+    if (activeTab === 'create') return 'Create Route'
+    if (activeTab === 'view') return 'View Routes'
+    if (activeTab === 'analytics-dashboard') return 'Dashboard'
+    return 'Dashboard'
   }
 
   return (
-    <SidebarProvider>
-      <AdminSidebar activeTab={activeTab} onNavClick={handleNavClick} />
-
-      <SidebarInset className="flex min-h-svh flex-col">
-        <header className="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12">
-          <div className="flex items-center gap-2 px-4">
-            <SidebarTrigger className="-ml-1" />
-            <Separator orientation="vertical" className="mr-2 h-4" />
-            <Breadcrumb>
-              <BreadcrumbList>
-                <BreadcrumbItem className="hidden md:block">
-                  <BreadcrumbLink href="#">Delivery System</BreadcrumbLink>
-                </BreadcrumbItem>
-                <BreadcrumbSeparator className="hidden md:block" />
-                <BreadcrumbItem>
-                  <BreadcrumbPage>
-                    {activeTab === 'create' ? 'Create Route' : 'View Routes'}
-                  </BreadcrumbPage>
-                </BreadcrumbItem>
-              </BreadcrumbList>
-            </Breadcrumb>
-          </div>
-        </header>
-        <div className="flex flex-1 flex-col gap-4 p-4 pt-0 overflow-auto">
-          <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-            <TabsList className="grid w-full max-w-md grid-cols-2">
-              <TabsTrigger value="create" className="flex items-center gap-2">
-                <MapPin className="size-4" />
-                Create Route
-              </TabsTrigger>
-              <TabsTrigger value="view" className="flex items-center gap-2">
-                <List className="size-4" />
-                View Routes
-              </TabsTrigger>
-            </TabsList>
-            <TabsContent value="create" className="mt-4">
-              <RouteMapCreator onSaveSuccess={() => setActiveTab('view')} />
-            </TabsContent>
-            <TabsContent value="view" className="mt-4">
-              <DeliveryRoutesTable />
-            </TabsContent>
-          </Tabs>
+    <div className="flex min-h-svh flex-col bg-muted/30">
+      <header className="flex h-16 shrink-0 items-center gap-3 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/60 px-4">
+        <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-linear-to-br from-cyan-400 to-blue-500 text-white shadow-lg shadow-cyan-500/50">
+          <Truck className="size-4" />
         </div>
-      </SidebarInset>
-    </SidebarProvider>
+        <div className="flex flex-col">
+          <span className="text-sm text-muted-foreground">Delivery System</span>
+          <span className="text-lg font-semibold">{getPageTitle()}</span>
+        </div>
+      </header>
+
+      <div className={cn(
+        "flex-1 overflow-auto",
+        activeTab === 'analytics-dashboard' ? "" : ""
+      )}>
+        {activeTab === 'analytics-dashboard' ? (
+          <OperationsDashboard />
+        ) : activeTab === 'create' ? (
+          <RouteCreationPage onSaveSuccess={() => handleNavClick('analytics-dashboard')} />
+        ) : activeTab === 'view' ? (
+          <div className="p-6">
+            <DeliveryRoutesTable />
+          </div>
+        ) : null}
+      </div>
+
+      <NavigationDock activeTab={activeTab} onNavClick={handleNavClick} />
+    </div>
   )
 }

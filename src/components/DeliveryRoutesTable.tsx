@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, startTransition } from 'react'
 import { useDataverseToken } from '@/hooks/useDataverseToken'
 import { dataverseApi, type DataverseResponse } from '@/lib/dataverseApi'
-import { type PsDeliveryroutes, psdeliveryroutesEntitySet } from '@/types/dataverse'
+import { type PsDeliveryroutes, psdeliveryroutesEntitySet, type PsVehicledatabase, psvehicledatabaseEntitySet } from '@/types/dataverse'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Spinner } from '@/components/ui/spinner'
@@ -15,10 +15,9 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from '@/components/ui/pagination'
-import { RouteDetailView } from '@/components/RouteDetailView'
+import { RouteDetailsP2 } from '@/components/RouteDetailsP2'
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -26,8 +25,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { TrashIcon } from 'lucide-react'
+import { Trash2, AlertTriangle, Loader2, X, Truck, MapPin, Calendar } from 'lucide-react'
 import { toast } from 'sonner'
+import { Badge } from '@/components/ui/badge'
 
 const ITEMS_PER_PAGE = 10
 
@@ -39,23 +39,27 @@ interface RouteGroup {
   stopCount: number
 }
 
-function groupRoutes(routes: PsDeliveryroutes[]): RouteGroup[] {
+function groupRoutes(routes: PsDeliveryroutes[], vehicleMap: Map<string, string>): RouteGroup[] {
   const groups = new Map<string, RouteGroup>()
 
   for (const route of routes) {
-    const vehicleName = route.ps_vehiclename || ''
-    const createdon = route.createdon || ''
+    const routeGroupId = route.ps_routegroupid || route.ps_routename || ''
+    const routeDate = route.ps_route_date || route.createdon || ''
     
-    const createdDate = createdon ? new Date(createdon) : new Date(0)
-    const timeKey = createdDate.getTime()
-    
-    const groupKey = `${vehicleName}_${timeKey}`
+    const groupKey = routeGroupId || `${route.ps_vehicle_route || route.ps_vehiclename || ''}_${routeDate}`
     
     if (!groups.has(groupKey)) {
+      let vehicleName: string | null = null
+      if (route.ps_vehicle_route && vehicleMap.has(route.ps_vehicle_route)) {
+        vehicleName = vehicleMap.get(route.ps_vehicle_route) || null
+      } else if (route.ps_vehiclename) {
+        vehicleName = route.ps_vehiclename
+      }
+      
       groups.set(groupKey, {
         id: groupKey,
-        vehicleName: route.ps_vehiclename ?? null,
-        createdon: route.createdon ?? '',
+        vehicleName,
+        createdon: (route.ps_route_date || route.createdon) ?? '',
         routes: [],
         stopCount: 0,
       })
@@ -76,6 +80,7 @@ function groupRoutes(routes: PsDeliveryroutes[]): RouteGroup[] {
 export function DeliveryRoutesTable() {
   const { getAccessToken, isLoading: tokenLoading, error: tokenError } = useDataverseToken()
   const [data, setData] = useState<PsDeliveryroutes[]>([])
+  const [vehicles, setVehicles] = useState<Map<string, string>>(new Map())
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<Error | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
@@ -85,8 +90,8 @@ export function DeliveryRoutesTable() {
   const [deleting, setDeleting] = useState(false)
 
   const routeGroups = useMemo(() => {
-    return groupRoutes(data)
-  }, [data])
+    return groupRoutes(data, vehicles)
+  }, [data, vehicles])
 
   const fetchAllDeliveryRoutes = useCallback(async () => {
     setLoading(true)
@@ -99,7 +104,42 @@ export function DeliveryRoutesTable() {
       }
 
       const allRoutes: PsDeliveryroutes[] = []
-      let url: string | undefined = 'https://pacerprojects.crm6.dynamics.com/api/data/v9.2/ps_deliveryrouteses?$select=ps_deliveryroutesid,ps_sequence,ps_sitelat,ps_sitelong,ps_vehiclename,createdon,modifiedon,statecode,statuscode&$orderby=createdon desc'
+      const selectFields = [
+        'ps_deliveryroutesid',
+        'ps_sequence',
+        'ps_sitelat',
+        'ps_sitelong',
+        'ps_vehiclename',
+        'ps_vehicle_route',
+        'ps_routegroupid',
+        'ps_routename',
+        'ps_route_date',
+        'ps_driver_name',
+        'ps_driver',
+        'ps_territorygroup',
+        'ps_plannedstarttime',
+        'ps_plannedendtime',
+        'ps_estimateddistance',
+        'ps_estimatedduration',
+        'ps_actualstarttime',
+        'ps_actualendtime',
+        'ps_capacityusage',
+        'ps_account',
+        'ps_address',
+        'ps_contactname',
+        'ps_contactphone',
+        'ps_orderpriority',
+        'ps_actualdeliverytime',
+        'ps_deliveredby',
+        'ps_deliveryconfirmationstatus',
+        'ps_drivernotes',
+        'ps_hasphoto',
+        'createdon',
+        'modifiedon',
+        'statecode',
+        'statuscode'
+      ].filter(Boolean).join(',')
+      let url: string | undefined = `https://pacerprojects.crm6.dynamics.com/api/data/v9.2/ps_deliveryrouteses?$select=${selectFields}&$orderby=ps_route_date desc,ps_routegroupid,ps_sequence`
 
       while (url) {
         const response = await fetch(url, {
@@ -115,6 +155,24 @@ export function DeliveryRoutesTable() {
 
         if (!response.ok) {
           const errorText = await response.text()
+          let errorJson: { error?: { code?: string; message?: string } }
+          try {
+            errorJson = JSON.parse(errorText) as { error?: { code?: string; message?: string } }
+          } catch {
+            errorJson = {}
+          }
+          
+          if (errorJson.error?.code === '0x80060888' && typeof errorJson.error.message === 'string') {
+            const matchResult = errorJson.error.message.match(/property named '([^']+)'/)
+            const fieldName = matchResult?.[1]
+            if (typeof fieldName === 'string') {
+              toast.error('Field not found', {
+                description: `Field '${fieldName}' does not exist in Dataverse. Please add it or remove it from the query.`,
+              })
+              throw new Error(`Field '${fieldName}' does not exist in Dataverse table`)
+            }
+          }
+          
           throw new Error(`API error: ${response.status} ${response.statusText}. ${errorText}`)
         }
 
@@ -128,6 +186,42 @@ export function DeliveryRoutesTable() {
       }
 
       setData(allRoutes)
+
+      const vehicleIds = [...new Set(
+        allRoutes
+          .map(r => r.ps_vehicle_route)
+          .filter((id): id is string => id !== null && id !== undefined)
+      )]
+
+      if (vehicleIds.length > 0) {
+        try {
+          const vehicleFilter = vehicleIds.map(id => `ps_vehicledatabaseid eq ${id}`).join(' or ')
+          const vehicleData = await dataverseApi.queryTable<PsVehicledatabase>(
+            token,
+            psvehicledatabaseEntitySet,
+            `$filter=${vehicleFilter}&$select=ps_vehicledatabaseid,ps_nickname,ps_plate,ps_make,ps_model`
+          )
+
+          const vehicleMap = new Map<string, string>()
+          vehicleData.forEach(vehicle => {
+            if (vehicle.ps_vehicledatabaseid) {
+              const nickname = vehicle.ps_nickname
+              const makeModel = vehicle.ps_make && vehicle.ps_model 
+                ? `${vehicle.ps_make} ${vehicle.ps_model}` 
+                : null
+              const plate = vehicle.ps_plate
+              const displayName = nickname || makeModel || plate || 'Unnamed Vehicle'
+              vehicleMap.set(vehicle.ps_vehicledatabaseid, displayName)
+            }
+          })
+          setVehicles(vehicleMap)
+        } catch (err) {
+          // Vehicle name lookup failed - will fall back to ps_vehiclename field
+          if (err instanceof Error) {
+            // Silently handle - vehicle names are optional for display
+          }
+        }
+      }
     } catch (err) {
       const fetchError = err instanceof Error ? err : new Error('Failed to fetch delivery routes')
       setError(fetchError)
@@ -208,47 +302,109 @@ export function DeliveryRoutesTable() {
     e.stopPropagation()
     setRouteGroupToDelete(group)
     setDeleteDialogOpen(true)
+    setError(null)
   }
 
   const handleDeleteConfirm = useCallback(async () => {
     if (!routeGroupToDelete || deleting) return
-
+  
+    const routeGroupToDeleteRef = routeGroupToDelete
+    const routeIdsToDelete = new Set(
+      routeGroupToDeleteRef.routes
+        .map(r => r.ps_deliveryroutesid)
+        .filter((id): id is string => id !== null && id !== undefined)
+    )
+  
+    if (routeIdsToDelete.size === 0) {
+      setError(new Error('No valid routes to delete'))
+      return
+    }
+  
+    // Immediately disable UI and clear previous errors
     setDeleting(true)
     setError(null)
-    
+  
     try {
       const token = await getAccessToken()
-      if (!token) {
-        throw new Error('Failed to get access token')
-      }
-
-      const deletePromises = routeGroupToDelete.routes.map((route) =>
-        route.ps_deliveryroutesid
-          ? dataverseApi.deleteRecord(token, psdeliveryroutesEntitySet, route.ps_deliveryroutesid)
-          : Promise.resolve()
+      if (!token) throw new Error('Failed to get access token')
+  
+      const routesToDelete = routeGroupToDeleteRef.routes.filter(r => r.ps_deliveryroutesid)
+  
+      // Parallel deletion with Promise.allSettled
+      type DeleteResult = { success: boolean; routeId: string }
+      const settledResults = await Promise.allSettled(
+        routesToDelete.map(route =>
+          dataverseApi
+            .deleteRecord(token, psdeliveryroutesEntitySet, route.ps_deliveryroutesid!)
+            .then(() => ({ success: true, routeId: route.ps_deliveryroutesid! }))
+            .catch(() => ({ success: false, routeId: route.ps_deliveryroutesid! }))
+        )
       )
-
-      await Promise.all(deletePromises)
       
-      toast.success('Route deleted successfully', {
-        description: `Deleted ${routeGroupToDelete.stopCount} stop${routeGroupToDelete.stopCount !== 1 ? 's' : ''}`,
+      const deleteResults: DeleteResult[] = settledResults.map((r): DeleteResult => {
+        if (r.status === 'fulfilled') {
+          return r.value
+        }
+        return r.reason as DeleteResult
       })
-      
+  
+      const failedCount = deleteResults.filter(r => !r.success).length
+  
+      if (failedCount > 0) {
+        const errorMessage =
+          failedCount === routesToDelete.length
+            ? `Failed to delete all ${routesToDelete.length} route${routesToDelete.length !== 1 ? 's' : ''}`
+            : `Failed to delete ${failedCount} of ${routesToDelete.length} route${routesToDelete.length !== 1 ? 's' : ''}`
+        throw new Error(errorMessage)
+      }
+  
+      const deletedCount = routeGroupToDeleteRef.stopCount
+      const currentRouteGroupsLength = routeGroups.length
+  
+      // Remove deleted routes from state
+      startTransition(() => {
+        setData(prevData =>
+          prevData.filter(route => !routeIdsToDelete.has(route.ps_deliveryroutesid!))
+        )
+      })
+  
+      toast.success('Route deleted successfully', {
+        description: `Successfully deleted ${deletedCount} stop${deletedCount !== 1 ? 's' : ''}`,
+        duration: 3000,
+      })
+  
+      // Close dialog
       setDeleteDialogOpen(false)
       setRouteGroupToDelete(null)
       setError(null)
-      
-      await fetchAllDeliveryRoutes()
+  
+      // Adjust pagination if needed
+      startTransition(() => {
+        const newLength = currentRouteGroupsLength - 1
+        if (currentPage > Math.ceil(newLength / ITEMS_PER_PAGE)) {
+          setCurrentPage(prev => Math.max(1, prev - 1))
+        }
+      })
     } catch (err) {
       const deleteErr: Error = err instanceof Error ? err : new Error('Failed to delete delivery routes')
       setError(deleteErr)
       toast.error('Failed to delete route', {
         description: deleteErr.message,
+        duration: 5000,
       })
     } finally {
       setDeleting(false)
     }
-  }, [routeGroupToDelete, deleting, getAccessToken, fetchAllDeliveryRoutes])
+  }, [routeGroupToDelete, deleting, getAccessToken, currentPage, routeGroups.length])
+  
+
+  const handleDeleteCancel = useCallback(() => {
+    if (!deleting) {
+      setDeleteDialogOpen(false)
+      setRouteGroupToDelete(null)
+      setError(null)
+    }
+  }, [deleting])
 
   const getErrorMessage = (err: Error | null): string | null => {
     if (!err) return null
@@ -257,7 +413,18 @@ export function DeliveryRoutesTable() {
   }
 
   if (selectedRouteGroup) {
-    return <RouteDetailView routes={selectedRouteGroup.routes} onBack={() => setSelectedRouteGroup(null)} />
+    return (
+      <RouteDetailsP2
+        routeGroupId={selectedRouteGroup.id}
+        routes={selectedRouteGroup.routes}
+        onBack={() => setSelectedRouteGroup(null)}
+        onNavigateToOrder={(orderId, stopId) => {
+          toast.info('Navigate to order', {
+            description: `Order ${orderId} - Stop ${stopId}`,
+          })
+        }}
+      />
+    )
   }
 
   if (loading) {
@@ -356,9 +523,9 @@ export function DeliveryRoutesTable() {
                               size="sm"
                               onClick={(e) => handleDeleteClick(e, group)}
                               disabled={deleting || loading}
-                              className="h-8 w-8 p-0 text-destructive hover:text-destructive disabled:opacity-50"
+                              className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10 disabled:opacity-50 transition-colors"
                             >
-                              <TrashIcon className="size-4" />
+                              <Trash2 className="size-4" />
                               <span className="sr-only">Delete</span>
                             </Button>
                           </TableCell>
@@ -426,71 +593,118 @@ export function DeliveryRoutesTable() {
       <AlertDialog 
         open={deleteDialogOpen} 
         onOpenChange={(open) => {
-          if (!deleting && !open) {
-            setDeleteDialogOpen(false)
-            setRouteGroupToDelete(null)
-            setError(null)
+          if (!open && !deleting) {
+            handleDeleteCancel()
           }
         }}
       >
-        <AlertDialogContent className="max-w-md">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Delivery Route</AlertDialogTitle>
-            <AlertDialogDescription className="space-y-3">
-              <p>
-                Are you sure you want to delete this route group with {routeGroupToDelete?.stopCount} stop{routeGroupToDelete?.stopCount !== 1 ? 's' : ''}? This action cannot be undone.
-              </p>
+        <AlertDialogContent className="max-w-lg sm:max-w-xl">
+          <div className="flex items-start gap-4">
+              <div className="shrink-0">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10">
+                  <AlertTriangle className="size-6 text-destructive" />
+                </div>
+              </div>
+            <div className="flex-1 space-y-4">
+              <AlertDialogHeader className="space-y-2">
+                <AlertDialogTitle className="text-xl font-semibold">
+                  Delete Delivery Route
+                </AlertDialogTitle>
+                <AlertDialogDescription className="text-base leading-relaxed">
+                  This action cannot be undone. This will permanently delete the route group and all associated stops.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+
               {routeGroupToDelete && (
-                <div className="mt-2 rounded-md bg-muted p-3 text-sm space-y-1">
-                  <div><strong>Vehicle:</strong> {routeGroupToDelete.vehicleName || 'Not specified'}</div>
-                  <div><strong>Stops:</strong> {routeGroupToDelete.stopCount}</div>
-                  <div><strong>Created:</strong> {formatDate(routeGroupToDelete.createdon)}</div>
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div className="flex items-start gap-2">
+                      <Truck className="size-4 mt-0.5 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Vehicle</div>
+                        <div className="text-sm font-medium truncate">
+                          {routeGroupToDelete.vehicleName || 'Not specified'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2">
+                      <MapPin className="size-4 mt-0.5 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Stops</div>
+                        <div className="text-sm font-medium">
+                          <Badge variant="secondary" className="mt-0.5">
+                            {routeGroupToDelete.stopCount} {routeGroupToDelete.stopCount === 1 ? 'stop' : 'stops'}
+                          </Badge>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-start gap-2 sm:col-span-2">
+                      <Calendar className="size-4 mt-0.5 text-muted-foreground shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Created</div>
+                        <div className="text-sm font-medium">{formatDate(routeGroupToDelete.createdon)}</div>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
+
               {deleting && (
-                <div className="mt-3 flex items-center gap-2 text-sm">
-                  <Spinner className="size-4" />
-                  <span>Deleting route and refreshing data...</span>
+                <div className="flex items-center gap-3 rounded-lg border bg-muted/30 p-4">
+                  <Loader2 className="size-5 text-primary animate-spin shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium">Deleting route...</div>
+                    <div className="text-xs text-muted-foreground mt-1">Please wait</div>
+                  </div>
                 </div>
               )}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          {getErrorMessage(error) && (
-            <div className="mx-6 rounded-md bg-destructive/10 p-3 text-sm text-destructive border border-destructive/20">
-              {getErrorMessage(error)}
-            </div>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel 
-              disabled={deleting}
-              onClick={() => {
-                if (!deleting) {
-                  setDeleteDialogOpen(false)
-                  setRouteGroupToDelete(null)
-                  setError(null)
-                }
-              }}
-            >
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault()
-                void handleDeleteConfirm()
-              }}
-              disabled={deleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {deleting ? (
-                <>
-                  <Spinner className="mr-2 size-4" />
-                  Deleting...
-                </>
-              ) : (
-                'Delete'
+
+              {error && getErrorMessage(error) && (
+                <div className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4">
+                  <AlertTriangle className="size-5 text-destructive shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm font-medium text-destructive">Error</div>
+                    <div className="text-sm text-destructive/90 mt-1">{getErrorMessage(error)}</div>
+                  </div>
+                </div>
               )}
-            </AlertDialogAction>
-          </AlertDialogFooter>
+
+              <AlertDialogFooter className="gap-2 sm:gap-0">
+                <AlertDialogCancel 
+                  disabled={deleting}
+                  onClick={handleDeleteCancel}
+                  className="sm:mr-2"
+                >
+                  <X className="size-4 mr-2" />
+                  Cancel
+                </AlertDialogCancel>
+                <Button
+                  onClick={(e) => {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    if (!deleting) {
+                      void handleDeleteConfirm()
+                    }
+                  }}
+                  disabled={deleting}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90 focus:ring-destructive disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                  type="button"
+                >
+                  {deleting ? (
+                    <>
+                      <Loader2 className="size-4 mr-2 animate-spin" />
+                      Deleting...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="size-4 mr-2" />
+                      Delete Route
+                    </>
+                  )}
+                </Button>
+              </AlertDialogFooter>
+            </div>
+          </div>
         </AlertDialogContent>
       </AlertDialog>
     </>
